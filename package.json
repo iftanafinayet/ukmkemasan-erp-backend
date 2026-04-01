@@ -6,8 +6,6 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "dev:frontend": "vite",
-    "build:frontend": "vite build",
     "seed:products": "node seeder.js",
     "seed:users": "node userSeeder.js",
     "seed:all": "node seedAll.js",

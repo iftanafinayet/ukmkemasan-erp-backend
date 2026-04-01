@@ -16,7 +16,7 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const customerRoutes = require('./routes/customerRoutes');
 const corsOptions = {
-  origin: ['http://localhost:5173', 'https://bucolic-stroopwafel-19285b.netlify.app'],
+  origin: ['http://localhost:5173', 'https://ukmkemasan-erp-frontend.vercel.app'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
