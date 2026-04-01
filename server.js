@@ -45,6 +45,22 @@ app.use('/api/orders', orderRoutes);
 // (Duplicate removed)
 app.use('/api/customers', customerRoutes);
 
+// TEMPORARY ROUTE: CLEAR DB
+app.get('/api/clear-db-now', async (req, res) => {
+  try {
+    const Order = require('./models/Order');
+    const Product = require('./models/Product');
+    const User = require('./models/User');
+    
+    await Order.deleteMany({});
+    await Product.deleteMany({});
+    await User.deleteMany({ role: { $ne: 'admin' } });
+    
+    res.send('✅ Database berhasil dibersihkan (kecuali Admin)! Silakan kabari saya agar route ini bisa segera dihapus demi keamanan.');
+  } catch (err) {
+    res.status(500).send('❌ Gagal: ' + err.message);
+  }
+});
 app.use(notFound);
 app.use(errorHandler);
 
