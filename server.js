@@ -19,11 +19,10 @@ const corsOptions = {
   origin: ['http://localhost:5173', 'https://bucolic-stroopwafel-19285b.netlify.app'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true // Penting jika nanti pakai cookie
+  credentials: true
 };
 
 connectDB();
-
 const app = express();
 
 // Middleware
