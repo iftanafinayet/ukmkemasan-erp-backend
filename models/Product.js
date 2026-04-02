@@ -9,7 +9,7 @@ const ProductSchema = new mongoose.Schema({
   category: {
     type: String,
     required: true,
-    enum: ['Standing Pouch', 'Gusset Side Seal', 'Gusset Quad Seal', 'Flat Bottom', 'Flatbottom Square', 'Flatbottom Rice Papper', 'Flatbottom Rice Papper Square', 'Sachet', 'Dripbag',]
+    enum: ['Standing Pouch', 'Gusset Side Seal', 'Gusset Quad Seal', 'Gusset', 'Flat Bottom', 'Flatbottom Square', 'Flatbottom Rice Papper', 'Flatbottom Rice Papper Square', 'Sachet', 'Dripbag', 'Vacuum Pack', 'Roll', 'Lain Lain']
   },
   material: {
     type: String,

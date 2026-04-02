@@ -56,11 +56,23 @@ app.get('/api/clear-db-now', async (req, res) => {
     await Product.deleteMany({});
     await User.deleteMany({ role: { $ne: 'admin' } });
     
-    res.send('✅ Database berhasil dibersihkan (kecuali Admin)! Silakan kabari saya agar route ini bisa segera dihapus demi keamanan.');
+    res.send('✅ Database berhasil dibersihkan (kecuali Admin)!');
   } catch (err) {
     res.status(500).send('❌ Gagal: ' + err.message);
   }
 });
+
+// TEMPORARY ROUTE: SEED CSV
+app.get('/api/seed-csv-now', async (req, res) => {
+  try {
+    const importCsv = require('./seederCsv');
+    const count = await importCsv();
+    res.send(`✅ Berhasil import ${count} produk dari file CSV!`);
+  } catch (err) {
+    res.status(500).send('❌ Gagal import CSV: ' + err.message);
+  }
+});
+
 app.use(notFound);
 app.use(errorHandler);
 
