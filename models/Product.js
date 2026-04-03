@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 
 const ProductSchema = new mongoose.Schema({
+  sku: {
+    type: String,
+    trim: true,
+    sparse: true
+  },
   name: {
     type: String,
     required: [true, 'Nama Produk harus diisi'],
