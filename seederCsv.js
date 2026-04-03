@@ -70,6 +70,7 @@ const importCsv = async () => {
         if (thickness) description += `Ketebalan: ${thickness}.`;
 
         products.push({
+            sku: sku || undefined,
             name: finalName,
             category: category,
             material: material,
