@@ -5,7 +5,21 @@ const { uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudina
 // @route   GET /api/products
 exports.getProducts = async (req, res) => {
     try {
-        const products = await Product.find();
+        const filter = {};
+
+        if (req.query.category) {
+            filter.category = req.query.category;
+        }
+
+        if (req.query.search) {
+            filter.$or = [
+                { name: { $regex: req.query.search, $options: 'i' } },
+                { sku: { $regex: req.query.search, $options: 'i' } },
+                { material: { $regex: req.query.search, $options: 'i' } }
+            ];
+        }
+
+        const products = await Product.find(filter).sort({ category: 1, name: 1, createdAt: -1 });
         res.json(products);
     } catch (error) {
         res.status(500).json({ message: error.message });

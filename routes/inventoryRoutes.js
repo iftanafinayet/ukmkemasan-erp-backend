@@ -4,6 +4,8 @@ const { protect, admin } = require('../middleware/authMiddleware');
 const {
   getWarehouses,
   createWarehouse,
+  updateWarehouse,
+  deleteWarehouse,
   createAdjustment,
   getStockCards
 } = require('../controllers/inventoryController');
@@ -15,6 +17,10 @@ router.use(protect);
 router.route('/warehouses')
   .get(getWarehouses)
   .post(admin, createWarehouse);
+
+router.route('/warehouses/:id')
+  .put(admin, updateWarehouse)
+  .delete(admin, deleteWarehouse);
 
 // Adjustment route (Admin only usually)
 router.post('/adjustments', admin, createAdjustment);

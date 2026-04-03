@@ -7,6 +7,7 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "seed:products": "node seeder.js",
+    "seed:catalog": "node seederCsv.js",
     "seed:users": "node userSeeder.js",
     "seed:all": "node seedAll.js",
     "seed:destroy": "node seedAll.js -d",

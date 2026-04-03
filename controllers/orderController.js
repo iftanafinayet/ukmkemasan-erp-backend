@@ -1,5 +1,7 @@
 const Order = require('../models/Order');
 const Product = require('../models/Product');
+const Warehouse = require('../models/Warehouse');
+const StockCard = require('../models/StockCard');
 const calculateQuote = require('../utils/quoteCalculator');
 
 // @desc    Buat Order Baru (Customer)
@@ -23,9 +25,9 @@ exports.createOrder = async (req, res) => {
     if (!product) return res.status(404).json({ message: 'Produk tidak ditemukan' });
 
     // --- LOGIKA STOK KRUSIAL ---
-    if (product.stock < qty) {
+    if ((product.stockPolos || 0) < qty) {
       return res.status(400).json({ 
-        message: `Stok tidak mencukupi. Stok tersedia saat ini: ${product.stock} pcs` 
+        message: `Stok tidak mencukupi. Stok tersedia saat ini: ${product.stockPolos || 0} pcs` 
       });
     }
 
@@ -58,8 +60,20 @@ exports.createOrder = async (req, res) => {
 
     // 7. POTONG STOK OTOMATIS
     // Setelah order berhasil dibuat, kita kurangi stok di koleksi Product
-    product.stock -= qty;
+    product.stockPolos = (product.stockPolos || 0) - qty;
     await product.save();
+
+    const defaultWarehouse = await Warehouse.findOne({ type: 'Main', isActive: true }).sort({ createdAt: 1 });
+    await StockCard.create({
+      product: product._id,
+      warehouse: defaultWarehouse?._id,
+      referenceType: 'Order',
+      referenceId: savedOrder._id,
+      referenceNo: savedOrder.orderNumber,
+      quantityChange: -qty,
+      balanceAfter: product.stockPolos,
+      note: `Pengurangan stok untuk order ${savedOrder.orderNumber}`
+    });
     
     // 8. Respon Sukses
     res.status(201).json({

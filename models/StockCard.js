@@ -5,8 +5,10 @@ const stockCardSchema = new mongoose.Schema({
   warehouse: { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse' },
   referenceType: { type: String, enum: ['Order', 'Adjustment', 'Return'] },
   referenceId: { type: mongoose.Schema.Types.ObjectId },
+  referenceNo: { type: String, trim: true },
   quantityChange: { type: Number, required: true },
-  balanceAfter: { type: Number, required: true }
+  balanceAfter: { type: Number, required: true },
+  note: { type: String, trim: true }
 }, { timestamps: true });
 
 module.exports = mongoose.model('StockCard', stockCardSchema);
