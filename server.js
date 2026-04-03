@@ -15,6 +15,7 @@ const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const customerRoutes = require('./routes/customerRoutes');
+const inventoryRoutes = require('./routes/inventoryRoutes');
 const corsOptions = {
   origin: ['http://localhost:5173', 'https://ukmkemasan-erp-frontend.vercel.app'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -44,6 +45,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/orders', orderRoutes);
 // (Duplicate removed)
 app.use('/api/customers', customerRoutes);
+app.use('/api/inventory', inventoryRoutes);
 
 // TEMPORARY ROUTE: CLEAR DB
 app.get('/api/clear-db-now', async (req, res) => {
