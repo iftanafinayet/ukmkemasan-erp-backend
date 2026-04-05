@@ -18,13 +18,16 @@ const protect = async (req, res, next) => {
 
             return next();
         } catch (error) {
-            console.error(error);
-            return res.status(401).json({ message: 'Tidak diizinkan, token gagal atau kadaluwarsa' });
+            if (error.name === 'TokenExpiredError') {
+                return res.status(401).json({ message: 'Token expired' });
+            }
+
+            return res.status(401).json({ message: 'Invalid token' });
         }
     }
 
     if (!token) {
-        return res.status(401).json({ message: 'Tidak diizinkan, tidak ada token' });
+        return res.status(401).json({ message: 'No token provided' });
     }
 };
 
