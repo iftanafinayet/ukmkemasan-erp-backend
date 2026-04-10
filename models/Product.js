@@ -123,7 +123,9 @@ ProductSchema.pre('validate', function syncSummary(next) {
 });
 
 ProductSchema.pre('insertMany', function syncSummaryOnInsert(next, docs) {
-  docs.forEach(syncSummaryFieldsFromVariants);
+  if (Array.isArray(docs)) {
+    docs.forEach(syncSummaryFieldsFromVariants);
+  }
   next();
 });
 
