@@ -197,7 +197,10 @@ const importCsv = async ({ reset = true } = {}) => {
   const products = await buildProductsFromCsv();
 
   if (reset) {
-    await Product.deleteMany({});
+    const result = await Product.deleteMany({
+      'variants.0': { $exists: true }
+    });
+    console.log(`🗑️  Menghapus ${result.deletedCount} produk yang memiliki varian`);
   }
 
   if (products.length > 0) {
