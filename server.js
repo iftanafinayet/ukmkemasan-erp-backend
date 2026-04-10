@@ -70,8 +70,10 @@ app.get('/api/clear-db-now', async (req, res) => {
 app.get('/api/seed-csv-now', async (req, res) => {
   try {
     const importCsv = require('./seederCsv');
+    const Product = require('./models/Product');
     const count = await importCsv();
-    res.send(`✅ Berhasil import ${count} produk dari file CSV!`);
+    const totalProducts = await Product.countDocuments();
+    res.send(`✅ Berhasil import ${count} produk dari file CSV. Total product di database: ${totalProducts}`);
   } catch (err) {
     console.error('❌ seed-csv-now error:', err);
     res.status(500).json({

@@ -229,13 +229,24 @@ const importCsv = async ({ reset = true, includeSingleVariant = true } = {}) => 
     await Product.insertMany(products, { ordered: false });
   }
 
+  const productNames = products.map((product) => product.name);
+  const insertedCount = await Product.countDocuments({
+    name: { $in: productNames }
+  });
+
+  if (insertedCount !== products.length) {
+    throw new Error(
+      `Verifikasi seed gagal. Expected ${products.length} product, tetapi hanya ${insertedCount} yang ada di database`
+    );
+  }
+
   if (includeSingleVariant) {
-    console.log(`📦 Menyiapkan ${products.length} product dari CSV`);
+    console.log(`📦 Menyiapkan ${insertedCount} product dari CSV`);
   } else {
     console.log(`⏭️  Melewati ${skippedCount} product satuan (hanya 1 varian)`);
   }
 
-  return products.length;
+  return insertedCount;
 };
 
 const run = async () => {
