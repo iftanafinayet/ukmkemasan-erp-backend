@@ -43,6 +43,16 @@ const normalizeCategory = (jenis = '', rawName = '') => {
   return allowedCategories.has(category) ? category : 'Lain Lain';
 };
 
+const buildSkuFallback = (rawName = 'product', color = 'default', size = 'default', index = 0) => {
+  const base = [rawName, color, size]
+    .join('-')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return `${base || 'product'}-${String(index + 1).padStart(2, '0')}`;
+};
+
 const buildProductsFromCsv = async () => {
   const filePath = path.join(__dirname, 'data', 'Price List Product UKM Kemasan Juli.csv');
   if (!fs.existsSync(filePath)) {
@@ -56,8 +66,8 @@ const buildProductsFromCsv = async () => {
   });
 
   let isHeader = true;
-  const products = [];
-  const seenNames = new Set();
+  const productMap = new Map();
+  const variantTracker = new Map();
 
   for await (const line of rl) {
     if (isHeader) {
@@ -80,34 +90,60 @@ const buildProductsFromCsv = async () => {
     const retailPrice = parseIndoNumber(cols[8]?.trim());
     const b2bPrice = parseIndoNumber(cols[9]?.trim());
 
-    const baseName = [rawName, color].filter(Boolean).join(' - ');
-    const finalName = [baseName || rawName, sku ? `(${sku})` : ''].join(' ').trim();
-    if (!finalName || seenNames.has(finalName)) continue;
-    seenNames.add(finalName);
+    const category = normalizeCategory(jenis, rawName);
+    const productKey = [category, material, rawName, thickness].join('::').toLowerCase();
+    const displayName = [rawName || 'Tanpa Nama', material, thickness].filter(Boolean).join(' - ');
+    const defaultValvePrice = /sachet|dripbag/i.test(jenis) ? 0 : 600;
 
-    const descriptionParts = [];
-    if (size) descriptionParts.push(`Ukuran: ${size}`);
-    if (thickness) descriptionParts.push(`Ketebalan: ${thickness}`);
-    if (color) descriptionParts.push(`Warna: ${color}`);
+    if (!productMap.has(productKey)) {
+      const descriptionParts = [];
+      if (thickness) descriptionParts.push(`Ketebalan: ${thickness}`);
 
-    products.push({
-      sku: sku || undefined,
-      name: finalName,
-      category: normalizeCategory(jenis, rawName),
-      material,
-      priceBase: b2bPrice || retailPrice,
+      productMap.set(productKey, {
+        sku: sku || undefined,
+        name: displayName,
+        category,
+        material,
+        priceBase: b2bPrice || retailPrice,
+        priceB2C: retailPrice || b2bPrice,
+        priceB2B: b2bPrice || retailPrice,
+        description: descriptionParts.join('. '),
+        stockPolos: 0,
+        minOrder: 100,
+        addons: {
+          valvePrice: defaultValvePrice
+        },
+        variants: []
+      });
+      variantTracker.set(productKey, new Set());
+    }
+
+    const product = productMap.get(productKey);
+    const productVariantKeys = variantTracker.get(productKey);
+    const stock = 500 + (product.variants.length % 12) * 250;
+    const variantSku = sku || buildSkuFallback(rawName, color, size, product.variants.length);
+    const variant = {
+      sku: variantSku,
+      color: color || 'Default',
+      size: size || 'Default',
       priceB2C: retailPrice || b2bPrice,
       priceB2B: b2bPrice || retailPrice,
-      description: descriptionParts.join('. '),
-      stockPolos: 500 + (products.length % 12) * 250,
-      minOrder: 100,
-      addons: {
-        valvePrice: /sachet|dripbag/i.test(jenis) ? 0 : 600
-      }
-    });
+      stock
+    };
+    const variantKey = [variant.sku, variant.color, variant.size].join('::').toLowerCase();
+
+    if (productVariantKeys.has(variantKey)) continue;
+
+    productVariantKeys.add(variantKey);
+    product.variants.push(variant);
+    product.stockPolos += stock;
+
+    if (!product.sku) {
+      product.sku = variantSku;
+    }
   }
 
-  return products;
+  return Array.from(productMap.values());
 };
 
 const importCsv = async ({ reset = true } = {}) => {
