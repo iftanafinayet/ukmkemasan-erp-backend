@@ -17,6 +17,7 @@ const orderRoutes = require('./routes/orderRoutes');
 const customerRoutes = require('./routes/customerRoutes');
 const inventoryRoutes = require('./routes/inventoryRoutes');
 const salesRoutes = require('./routes/salesRoutes');
+const landingContentRoutes = require('./routes/landingContentRoutes');
 const corsOptions = {
   origin: ['http://localhost:5173', 'https://ukmkemasan-erp-frontend.vercel.app'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -48,6 +49,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/sales', salesRoutes);
+app.use('/api/landing-content', landingContentRoutes);
 
 // TEMPORARY ROUTE: CLEAR DB
 app.get('/api/clear-db-now', async (req, res) => {
