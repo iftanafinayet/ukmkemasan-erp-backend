@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect, admin } = require('../middleware/authMiddleware');
 const {
+  getInventoryProductOptions,
   getWarehouses,
   createWarehouse,
   updateWarehouse,
@@ -14,6 +15,8 @@ const {
 router.use(protect);
 
 // Warehouse routes
+router.get('/products', getInventoryProductOptions);
+
 router.route('/warehouses')
   .get(getWarehouses)
   .post(admin, createWarehouse);
