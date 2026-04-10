@@ -116,14 +116,19 @@ const normalizeProductPayload = (payload = {}, existingProduct = null) => {
     return normalizedPayload;
 };
 
-const ensureLegacyProductHasVariant = async (product) => {
-    if (!product || (Array.isArray(product.variants) && product.variants.length > 0)) {
-        return product;
+const getNormalizedVariants = (product) => {
+    if (!product) return [];
+
+    const variants = (product.variants || []).map((variant) =>
+        typeof variant?.toObject === 'function' ? variant.toObject() : variant
+    );
+
+    if (variants.length > 0) {
+        return variants;
     }
 
-    product.variants = [buildLegacyVariant(product.toObject())];
-    await product.save();
-    return product;
+    const source = typeof product.toObject === 'function' ? product.toObject() : product;
+    return [buildLegacyVariant(source)];
 };
 
 // @desc    Ambil semua produk
@@ -161,11 +166,10 @@ exports.getProductById = async (req, res) => {
         const product = await Product.findById(req.params.id);
         if (!product) return res.status(404).json({ message: 'Produk tidak ditemukan' });
 
-        await ensureLegacyProductHasVariant(product);
-
         const productData = product.toObject();
-        productData.availableColors = [...new Set((productData.variants || []).map((variant) => variant.color))];
-        productData.availableSizes = [...new Set((productData.variants || []).map((variant) => variant.size))];
+        productData.variants = getNormalizedVariants(product);
+        productData.availableColors = [...new Set(productData.variants.map((variant) => variant.color))];
+        productData.availableSizes = [...new Set(productData.variants.map((variant) => variant.size))];
 
         res.json(productData);
     } catch (error) {
