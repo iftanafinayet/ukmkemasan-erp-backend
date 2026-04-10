@@ -117,9 +117,8 @@ ProductSchema.methods.syncSummaryFieldsFromVariants = function syncSummaryFields
   applyVariantSummaryFields(this);
 };
 
-ProductSchema.pre('validate', function syncSummary(next) {
+ProductSchema.pre('validate', function syncSummary() {
   this.syncSummaryFieldsFromVariants();
-  next();
 });
 
 ProductSchema.pre('insertMany', function syncSummaryOnInsert(docs) {
