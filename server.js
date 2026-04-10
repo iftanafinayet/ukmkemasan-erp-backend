@@ -73,7 +73,12 @@ app.get('/api/seed-csv-now', async (req, res) => {
     const count = await importCsv();
     res.send(`✅ Berhasil import ${count} produk dari file CSV!`);
   } catch (err) {
-    res.status(500).send('❌ Gagal import CSV: ' + err.message);
+    console.error('❌ seed-csv-now error:', err);
+    res.status(500).json({
+      error: err.message,
+      stack: err.stack,
+      code: err.code
+    });
   }
 });
 
