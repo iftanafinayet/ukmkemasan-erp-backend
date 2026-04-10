@@ -2,6 +2,27 @@ const Product = require('../models/Product');
 const { uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary');
 
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object || {}, key);
+const normalizeWhitespace = (value = '') => String(value).replace(/\s+/g, ' ').trim();
+
+const extractLegacyDescriptionField = (description = '', label = '') => {
+    const match = normalizeWhitespace(description).match(new RegExp(`${label}\\s*:\\s*([^\\.]+)`, 'i'));
+    return normalizeWhitespace(match?.[1] || '');
+};
+
+const extractWeightFromName = (name = '') => {
+    const match = normalizeWhitespace(name).match(/(\d+(?:[.,]\d+)?)\s*(gr|kg)\b/i);
+    if (!match) return '';
+
+    return `${match[1].replace(/([.,]0+)$/, '')} ${match[2].toLowerCase()}`;
+};
+
+const removeSkuSuffixFromName = (name = '') => normalizeWhitespace(name).replace(/\s*\([^)]*\)\s*$/, '').trim();
+
+const extractColorFromName = (name = '') => {
+    const cleanedName = removeSkuSuffixFromName(name);
+    const parts = cleanedName.split(' - ').map(normalizeWhitespace).filter(Boolean);
+    return parts.length > 1 ? parts[parts.length - 1] : '';
+};
 
 const toNumberOrFallback = (...values) => {
     for (const value of values) {
@@ -61,12 +82,28 @@ const hasLegacyVariantFields = (payload = {}) => (
 const buildLegacyVariant = (payload = {}, existingVariant = {}) => normalizeVariant({
     _id: existingVariant._id,
     sku: payload.sku ?? existingVariant.sku,
-    color: payload.color ?? existingVariant.color ?? 'Default',
-    size: payload.size ?? existingVariant.size ?? 'Default',
+    color: payload.color
+        || existingVariant.color
+        || extractLegacyDescriptionField(payload.description, 'Warna')
+        || extractColorFromName(payload.name)
+        || 'Default',
+    size: payload.size
+        || existingVariant.size
+        || extractWeightFromName(payload.name)
+        || extractLegacyDescriptionField(payload.description, 'Ukuran')
+        || 'Default',
     priceB2C: payload.priceB2C ?? existingVariant.priceB2C ?? payload.priceBase,
     priceB2B: payload.priceB2B ?? existingVariant.priceB2B ?? payload.priceBase ?? payload.priceB2C,
     stock: payload.stock ?? payload.stockPolos ?? existingVariant.stock ?? 0
 }, 0, payload.name || 'product');
+
+const serializeProduct = (product) => {
+    const productData = typeof product.toObject === 'function' ? product.toObject() : { ...product };
+    productData.variants = getNormalizedVariants(product);
+    productData.availableColors = [...new Set(productData.variants.map((variant) => variant.color))];
+    productData.availableSizes = [...new Set(productData.variants.map((variant) => variant.size))];
+    return productData;
+};
 
 const normalizeProductPayload = (payload = {}, existingProduct = null) => {
     const normalizedPayload = { ...payload };
@@ -153,7 +190,7 @@ exports.getProducts = async (req, res) => {
         }
 
         const products = await Product.find(filter).sort({ category: 1, name: 1, createdAt: -1 });
-        res.json(products);
+        res.json(products.map(serializeProduct));
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -166,12 +203,7 @@ exports.getProductById = async (req, res) => {
         const product = await Product.findById(req.params.id);
         if (!product) return res.status(404).json({ message: 'Produk tidak ditemukan' });
 
-        const productData = product.toObject();
-        productData.variants = getNormalizedVariants(product);
-        productData.availableColors = [...new Set(productData.variants.map((variant) => variant.color))];
-        productData.availableSizes = [...new Set(productData.variants.map((variant) => variant.size))];
-
-        res.json(productData);
+        res.json(serializeProduct(product));
     } catch (error) {
         res.status(500).json({ message: error.message });
     }

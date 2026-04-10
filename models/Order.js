@@ -23,8 +23,14 @@ const OrderSchema = new mongoose.Schema({
             type: Number,
             required: true
         },
+        variantId: {
+            type: mongoose.Schema.Types.ObjectId
+        },
+        sku: String,
         material: String,
         size: String,
+        color: String,
+        unitPrice: Number,
         useValve: { type: Boolean, default: false}
     },
 

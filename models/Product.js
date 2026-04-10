@@ -7,11 +7,19 @@ const syncSummaryFieldsFromVariants = (product) => {
 
   const [primaryVariant] = product.variants;
   const totalStock = product.variants.reduce((sum, variant) => sum + (Number(variant.stock) || 0), 0);
+  const minPriceB2C = product.variants.reduce((min, variant) => {
+    const current = Number(variant.priceB2C) || 0;
+    return min === null || current < min ? current : min;
+  }, null);
+  const minPriceB2B = product.variants.reduce((min, variant) => {
+    const current = Number(variant.priceB2B) || Number(variant.priceB2C) || 0;
+    return min === null || current < min ? current : min;
+  }, null);
 
   product.sku = primaryVariant.sku;
-  product.priceBase = Number(primaryVariant.priceB2B) || Number(primaryVariant.priceB2C) || 0;
-  product.priceB2C = Number(primaryVariant.priceB2C) || 0;
-  product.priceB2B = Number(primaryVariant.priceB2B) || Number(primaryVariant.priceB2C) || 0;
+  product.priceBase = minPriceB2B || minPriceB2C || 0;
+  product.priceB2C = minPriceB2C || 0;
+  product.priceB2B = minPriceB2B || minPriceB2C || 0;
   product.stockPolos = totalStock;
 };
 

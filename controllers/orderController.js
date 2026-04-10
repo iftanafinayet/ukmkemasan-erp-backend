@@ -7,7 +7,7 @@ const calculateQuote = require('../utils/quoteCalculator');
 // @desc    Buat Order Baru (Customer)
 exports.createOrder = async (req, res) => {
   try {
-    const { productId, quantity, useValve } = req.body;
+    const { productId, quantity, useValve, variantId } = req.body;
     const qty = parseInt(quantity);
 
     // 1. Validasi Input Dasar
@@ -24,15 +24,31 @@ exports.createOrder = async (req, res) => {
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ message: 'Produk tidak ditemukan' });
 
+    const selectedVariant = variantId
+      ? product.variants?.id(variantId)
+      : null;
+
+    if (!variantId && Array.isArray(product.variants) && product.variants.length > 1) {
+      return res.status(400).json({ message: 'Pilih varian produk terlebih dahulu' });
+    }
+
+    if (variantId && !selectedVariant) {
+      return res.status(400).json({ message: 'Varian produk tidak ditemukan' });
+    }
+
+    const availableStock = selectedVariant
+      ? (selectedVariant.stock || 0)
+      : (product.stockPolos || 0);
+
     // --- LOGIKA STOK KRUSIAL ---
-    if ((product.stockPolos || 0) < qty) {
+    if (availableStock < qty) {
       return res.status(400).json({ 
-        message: `Stok tidak mencukupi. Stok tersedia saat ini: ${product.stockPolos || 0} pcs` 
+        message: `Stok tidak mencukupi. Stok tersedia saat ini: ${availableStock} pcs` 
       });
     }
 
     // 4. Jalankan Quotation Engine (B2C vs B2B)
-    const quote = calculateQuote(product, qty, useValve);
+    const quote = calculateQuote(product, qty, useValve, selectedVariant);
 
     // 5. Generate Order Number
     const count = await Order.countDocuments();
@@ -45,6 +61,11 @@ exports.createOrder = async (req, res) => {
       product: productId,
       details: { 
         quantity: qty, 
+        variantId: selectedVariant?._id,
+        sku: selectedVariant?.sku || product.sku,
+        material: product.material,
+        size: selectedVariant?.size || '',
+        color: selectedVariant?.color || '',
         useValve: useValve || false,
         unitPrice: quote.unitPriceFinal 
       },
@@ -60,7 +81,11 @@ exports.createOrder = async (req, res) => {
 
     // 7. POTONG STOK OTOMATIS
     // Setelah order berhasil dibuat, kita kurangi stok di koleksi Product
-    product.stockPolos = (product.stockPolos || 0) - qty;
+    if (selectedVariant) {
+      selectedVariant.stock = Math.max(0, (selectedVariant.stock || 0) - qty);
+    } else {
+      product.stockPolos = Math.max(0, (product.stockPolos || 0) - qty);
+    }
     await product.save();
 
     const defaultWarehouse = await Warehouse.findOne({ type: 'Main', isActive: true }).sort({ createdAt: 1 });
@@ -72,7 +97,9 @@ exports.createOrder = async (req, res) => {
       referenceNo: savedOrder.orderNumber,
       quantityChange: -qty,
       balanceAfter: product.stockPolos,
-      note: `Pengurangan stok untuk order ${savedOrder.orderNumber}`
+      note: selectedVariant
+        ? `Pengurangan stok varian ${selectedVariant.size}/${selectedVariant.color} untuk order ${savedOrder.orderNumber}`
+        : `Pengurangan stok untuk order ${savedOrder.orderNumber}`
     });
     
     // 8. Respon Sukses

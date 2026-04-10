@@ -3,11 +3,13 @@
  * @param {Object} product - Data produk dari DB
  * @param {Number} quantity - Jumlah pesanan (kelipatan 100)
  * @param {Boolean} useValve - Apakah pakai valve kopi
+ * @param {Object|null} selectedVariant - Varian produk yang dipilih
  */
-const calculateQuote = (product, quantity, useValve) => {
+const calculateQuote = (product, quantity, useValve, selectedVariant = null) => {
   // 1. Tentukan Harga Dasar (Base Price)
   // B2B jika >= 1000, selain itu B2C
-  let basePrice = quantity >= 1000 ? product.priceB2B : product.priceB2C;
+  const priceSource = selectedVariant || product;
+  let basePrice = quantity >= 1000 ? priceSource.priceB2B : priceSource.priceB2C;
 
   // 2. Tambahan Biaya Valve (jika request)
   // Biasanya valve dihitung per pcs

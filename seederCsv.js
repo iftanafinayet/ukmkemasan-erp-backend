@@ -12,6 +12,8 @@ const parseIndoNumber = (value) => {
   return parseInt(String(value).replace(/\./g, ''), 10) || 0;
 };
 
+const normalizeWhitespace = (value = '') => String(value).replace(/\s+/g, ' ').trim();
+
 const normalizeCategory = (jenis = '', rawName = '') => {
   let category = jenis.trim();
 
@@ -41,6 +43,19 @@ const normalizeCategory = (jenis = '', rawName = '') => {
   ]);
 
   return allowedCategories.has(category) ? category : 'Lain Lain';
+};
+
+const extractWeightLabel = (rawName = '') => {
+  const match = normalizeWhitespace(rawName).match(/(\d+(?:[.,]\d+)?)\s*(gr|kg)\b/i);
+  if (!match) return '';
+
+  return `${match[1].replace(/([.,]0+)$/, '')} ${match[2].toLowerCase()}`;
+};
+
+const extractFamilyName = (rawName = '', fallbackCategory = 'Produk') => {
+  const normalizedName = normalizeWhitespace(rawName);
+  const withoutWeight = normalizedName.replace(/(\d+(?:[.,]\d+)?)\s*(gr|kg)\b/ig, '');
+  return normalizeWhitespace(withoutWeight) || fallbackCategory;
 };
 
 const buildSkuFallback = (rawName = 'product', color = 'default', size = 'default', index = 0) => {
@@ -91,29 +106,30 @@ const buildProductsFromCsv = async () => {
     const b2bPrice = parseIndoNumber(cols[9]?.trim());
 
     const category = normalizeCategory(jenis, rawName);
-    const productKey = [category, material, rawName, thickness].join('::').toLowerCase();
-    const displayName = [rawName || 'Tanpa Nama', material, thickness].filter(Boolean).join(' - ');
+    const familyName = extractFamilyName(rawName, category);
+    const productKey = [category, familyName].join('::').toLowerCase();
     const defaultValvePrice = /sachet|dripbag/i.test(jenis) ? 0 : 600;
+    const variantSize = extractWeightLabel(rawName) || normalizeWhitespace(size) || 'Default';
+    const variantColor = normalizeWhitespace(color) || 'Default';
 
     if (!productMap.has(productKey)) {
-      const descriptionParts = [];
-      if (thickness) descriptionParts.push(`Ketebalan: ${thickness}`);
-
       productMap.set(productKey, {
         sku: sku || undefined,
-        name: displayName,
+        name: familyName,
         category,
         material,
         priceBase: b2bPrice || retailPrice,
         priceB2C: retailPrice || b2bPrice,
         priceB2B: b2bPrice || retailPrice,
-        description: descriptionParts.join('. '),
+        description: '',
         stockPolos: 0,
         minOrder: 100,
         addons: {
           valvePrice: defaultValvePrice
         },
-        variants: []
+        variants: [],
+        _materials: new Set(material ? [material] : []),
+        _thicknesses: new Set(thickness ? [normalizeWhitespace(thickness)] : [])
       });
       variantTracker.set(productKey, new Set());
     }
@@ -121,11 +137,11 @@ const buildProductsFromCsv = async () => {
     const product = productMap.get(productKey);
     const productVariantKeys = variantTracker.get(productKey);
     const stock = 500 + (product.variants.length % 12) * 250;
-    const variantSku = sku || buildSkuFallback(rawName, color, size, product.variants.length);
+    const variantSku = sku || buildSkuFallback(familyName, variantColor, variantSize, product.variants.length);
     const variant = {
       sku: variantSku,
-      color: color || 'Default',
-      size: size || 'Default',
+      color: variantColor,
+      size: variantSize,
       priceB2C: retailPrice || b2bPrice,
       priceB2B: b2bPrice || retailPrice,
       stock
@@ -137,13 +153,44 @@ const buildProductsFromCsv = async () => {
     productVariantKeys.add(variantKey);
     product.variants.push(variant);
     product.stockPolos += stock;
+    if (material) product._materials.add(material);
+    if (thickness) product._thicknesses.add(normalizeWhitespace(thickness));
 
     if (!product.sku) {
       product.sku = variantSku;
     }
   }
 
-  return Array.from(productMap.values());
+  return Array.from(productMap.values()).map((product) => {
+    const materials = Array.from(product._materials);
+    const thicknesses = Array.from(product._thicknesses);
+    const descriptionParts = [];
+
+    if (product.variants.length > 0) {
+      descriptionParts.push(`Varian ukuran: ${product.variants.map((variant) => variant.size).join(', ')}`);
+    }
+    if (materials.length > 0) {
+      descriptionParts.push(`Material: ${materials.join(', ')}`);
+    }
+    if (thicknesses.length > 0) {
+      descriptionParts.push(`Ketebalan: ${thicknesses.join(', ')}`);
+    }
+
+    return {
+      sku: product.sku,
+      name: product.name,
+      category: product.category,
+      material: materials.length === 1 ? materials[0] : 'Multi Material',
+      priceBase: product.priceBase,
+      priceB2C: product.priceB2C,
+      priceB2B: product.priceB2B,
+      description: descriptionParts.join('. '),
+      stockPolos: product.stockPolos,
+      minOrder: product.minOrder,
+      addons: product.addons,
+      variants: product.variants
+    };
+  });
 };
 
 const importCsv = async ({ reset = true } = {}) => {
