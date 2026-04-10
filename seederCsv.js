@@ -225,8 +225,19 @@ const importCsv = async ({ reset = true, includeSingleVariant = true } = {}) => 
     console.log(`🗑️  Menghapus ${result.deletedCount} produk lama`);
   }
 
-  if (products.length > 0) {
-    await Product.insertMany(products, { ordered: false });
+  const insertedIds = [];
+  const failedProducts = [];
+
+  for (const product of products) {
+    try {
+      const created = await Product.create(product);
+      insertedIds.push(created._id);
+    } catch (error) {
+      failedProducts.push({
+        name: product.name,
+        message: error.message
+      });
+    }
   }
 
   const productNames = products.map((product) => product.name);
@@ -234,9 +245,18 @@ const importCsv = async ({ reset = true, includeSingleVariant = true } = {}) => 
     name: { $in: productNames }
   });
 
-  if (insertedCount !== products.length) {
+  if (failedProducts.length > 0 || insertedCount !== products.length) {
+    if (insertedIds.length > 0) {
+      await Product.deleteMany({ _id: { $in: insertedIds } });
+    }
+
+    const failurePreview = failedProducts
+      .slice(0, 5)
+      .map((item) => `${item.name}: ${item.message}`)
+      .join(' | ');
+
     throw new Error(
-      `Verifikasi seed gagal. Expected ${products.length} product, tetapi hanya ${insertedCount} yang ada di database`
+      `Verifikasi seed gagal. Expected ${products.length} product, berhasil ${insertedCount}, gagal ${failedProducts.length}.${failurePreview ? ` Detail: ${failurePreview}` : ''}`
     );
   }
 
