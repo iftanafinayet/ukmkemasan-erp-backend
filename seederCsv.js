@@ -194,19 +194,22 @@ const buildProductsFromCsv = async () => {
 };
 
 const importCsv = async ({ reset = true } = {}) => {
-  const products = await buildProductsFromCsv();
+  const allProducts = await buildProductsFromCsv();
+
+  // Filter: hanya import produk yang punya lebih dari 1 varian (hapus satuan)
+  const products = allProducts.filter((p) => p.variants.length > 1);
+  const skippedCount = allProducts.length - products.length;
 
   if (reset) {
-    const result = await Product.deleteMany({
-      'variants.0': { $exists: true }
-    });
-    console.log(`🗑️  Menghapus ${result.deletedCount} produk yang memiliki varian`);
+    const result = await Product.deleteMany({});
+    console.log(`🗑️  Menghapus ${result.deletedCount} produk lama`);
   }
 
   if (products.length > 0) {
     await Product.insertMany(products, { ordered: false });
   }
 
+  console.log(`⏭️  Melewati ${skippedCount} produk satuan (hanya 1 varian)`);
   return products.length;
 };
 
