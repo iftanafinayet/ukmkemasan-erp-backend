@@ -122,11 +122,10 @@ ProductSchema.pre('validate', function syncSummary(next) {
   next();
 });
 
-ProductSchema.pre('insertMany', function syncSummaryOnInsert(next, docs) {
+ProductSchema.pre('insertMany', function syncSummaryOnInsert(docs) {
   if (Array.isArray(docs)) {
     docs.forEach(syncSummaryFieldsFromVariants);
   }
-  next();
 });
 
 module.exports = mongoose.model('Product', ProductSchema);
