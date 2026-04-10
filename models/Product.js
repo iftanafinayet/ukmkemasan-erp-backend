@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const syncSummaryFieldsFromVariants = (product) => {
+const applyVariantSummaryFields = (product) => {
   if (!product || !Array.isArray(product.variants) || product.variants.length === 0) {
     return;
   }
@@ -114,7 +114,7 @@ const ProductSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 ProductSchema.methods.syncSummaryFieldsFromVariants = function syncSummaryFieldsFromVariants() {
-  syncSummaryFieldsFromVariants(this);
+  applyVariantSummaryFields(this);
 };
 
 ProductSchema.pre('validate', function syncSummary(next) {
@@ -124,7 +124,7 @@ ProductSchema.pre('validate', function syncSummary(next) {
 
 ProductSchema.pre('insertMany', function syncSummaryOnInsert(docs) {
   if (Array.isArray(docs)) {
-    docs.forEach(syncSummaryFieldsFromVariants);
+    docs.forEach(applyVariantSummaryFields);
   }
 });
 
