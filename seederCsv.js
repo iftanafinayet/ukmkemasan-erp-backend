@@ -14,11 +14,35 @@ const parseIndoNumber = (value) => {
 
 const normalizeWhitespace = (value = '') => String(value).replace(/\s+/g, ' ').trim();
 
+const allowedCategories = new Set([
+  'Standing Pouch',
+  'Gusset Side Seal',
+  'Gusset Quad Seal',
+  'Gusset',
+  'Flat Bottom',
+  'Flatbottom Square',
+  'Flatbottom Rice Papper',
+  'Flatbottom Rice Papper Square',
+  'Sachet',
+  'Dripbag',
+  'Vacuum Pack',
+  'Roll',
+  'Lain Lain'
+]);
+
 const normalizeCategory = (jenis = '', rawName = '') => {
   let category = jenis.trim();
 
-  if (/rice papper/i.test(category) && !/square/i.test(category)) {
-    category = 'Flatbottom Rice Papper';
+  if (/flat bottom/i.test(category)) {
+    if (/rice paper/i.test(rawName) && /square/i.test(rawName)) {
+      category = 'Flatbottom Rice Papper Square';
+    } else if (/rice paper/i.test(rawName)) {
+      category = 'Flatbottom Rice Papper';
+    } else if (/square/i.test(rawName)) {
+      category = 'Flatbottom Square';
+    } else {
+      category = 'Flat Bottom';
+    }
   }
 
   if (/gusset/i.test(category)) {
@@ -26,21 +50,9 @@ const normalizeCategory = (jenis = '', rawName = '') => {
     if (/centre seal|side seal/i.test(rawName)) category = 'Gusset Side Seal';
   }
 
-  const allowedCategories = new Set([
-    'Standing Pouch',
-    'Gusset Side Seal',
-    'Gusset Quad Seal',
-    'Gusset',
-    'Flat Bottom',
-    'Flatbottom Square',
-    'Flatbottom Rice Papper',
-    'Flatbottom Rice Papper Square',
-    'Sachet',
-    'Dripbag',
-    'Vacuum Pack',
-    'Roll',
-    'Lain Lain'
-  ]);
+  if (/drip/i.test(rawName)) {
+    category = 'Dripbag';
+  }
 
   return allowedCategories.has(category) ? category : 'Lain Lain';
 };
@@ -193,12 +205,20 @@ const buildProductsFromCsv = async () => {
   });
 };
 
-const importCsv = async ({ reset = true } = {}) => {
+const importCsv = async ({ reset = true, includeSingleVariant = true } = {}) => {
   const allProducts = await buildProductsFromCsv();
+  if (allProducts.length === 0) {
+    throw new Error('Seeder dibatalkan karena builder CSV menghasilkan 0 product');
+  }
 
-  // Filter: hanya import produk yang punya lebih dari 1 varian (hapus satuan)
-  const products = allProducts.filter((p) => p.variants.length > 1);
+  const products = includeSingleVariant
+    ? allProducts
+    : allProducts.filter((product) => product.variants.length > 1);
   const skippedCount = allProducts.length - products.length;
+
+  if (products.length === 0) {
+    throw new Error('Seeder dibatalkan karena tidak ada product yang lolos filter import');
+  }
 
   if (reset) {
     const result = await Product.deleteMany({});
@@ -209,14 +229,21 @@ const importCsv = async ({ reset = true } = {}) => {
     await Product.insertMany(products, { ordered: false });
   }
 
-  console.log(`⏭️  Melewati ${skippedCount} produk satuan (hanya 1 varian)`);
+  if (includeSingleVariant) {
+    console.log(`📦 Menyiapkan ${products.length} product dari CSV`);
+  } else {
+    console.log(`⏭️  Melewati ${skippedCount} product satuan (hanya 1 varian)`);
+  }
+
   return products.length;
 };
 
 const run = async () => {
   try {
     await connectDB();
-    const count = await importCsv({ reset: true });
+    const includeSingleVariant = !process.argv.includes('--only-multi-variant');
+    const reset = !process.argv.includes('--keep-existing');
+    const count = await importCsv({ reset, includeSingleVariant });
     console.log(`✅ Berhasil import ${count} produk dari CSV`);
     process.exit(0);
   } catch (error) {
