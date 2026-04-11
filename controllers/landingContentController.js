@@ -181,6 +181,13 @@ exports.updateLandingContent = async (req, res) => {
     content.articles = nextArticles;
     content.activities = nextActivities;
 
+    if (payload.articleSectionConfig) {
+      content.articleSectionConfig = payload.articleSectionConfig;
+    }
+    if (payload.gallerySectionConfig) {
+      content.gallerySectionConfig = payload.gallerySectionConfig;
+    }
+
     const updatedContent = await content.save();
     res.json(updatedContent);
   } catch (error) {
