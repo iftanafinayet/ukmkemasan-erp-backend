@@ -168,6 +168,59 @@ const getNormalizedVariants = (product) => {
     return [buildLegacyVariant(source)];
 };
 
+// @desc    Ambil produk populer (berdasarkan jumlah penjualan terbanyak)
+// @route   GET /api/products/popular
+exports.getPopularProducts = async (req, res) => {
+    try {
+        const Order = require('../models/Order');
+        
+        // Agregasi jumlah penjualan per produk dari semua order
+        const salesStats = await Order.aggregate([
+            {
+                $group: {
+                    _id: '$product',
+                    totalQuantity: { $sum: '$details.quantity' }
+                }
+            },
+            { $sort: { totalQuantity: -1 } },
+            { $limit: 3 }
+        ]);
+
+        let productIds = salesStats.map(stat => stat._id);
+        let products = [];
+
+        if (productIds.length > 0) {
+            products = await Product.find({ _id: { $in: productIds } });
+        }
+
+        // Jika tidak ada data penjualan, ambil 3 produk terbaru sebagai fallback
+        if (products.length === 0) {
+            const fallbackProducts = await Product.find().sort({ createdAt: -1 }).limit(3);
+            return res.json(fallbackProducts.map(p => {
+                const productData = serializeProduct(p);
+                productData.totalSold = 0;
+                return productData;
+            }));
+        }
+        
+        // Urutkan kembali produk sesuai urutan penjualan terbanyak
+        const sortedProducts = productIds.map(id => {
+            const product = products.find(p => p._id.toString() === id.toString());
+            if (product) {
+                const stat = salesStats.find(s => s._id.toString() === id.toString());
+                const productData = serializeProduct(product);
+                productData.totalSold = stat.totalQuantity;
+                return productData;
+            }
+            return null;
+        }).filter(Boolean);
+
+        res.json(sortedProducts);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 // @desc    Ambil semua produk
 // @route   GET /api/products
 exports.getProducts = async (req, res) => {

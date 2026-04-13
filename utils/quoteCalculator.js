@@ -12,8 +12,9 @@ const calculateQuote = (product, quantity, useValve, selectedVariant = null) => 
   let basePrice = quantity >= 1000 ? priceSource.priceB2B : priceSource.priceB2C;
 
   // 2. Tambahan Biaya Valve (jika request)
-  // Biasanya valve dihitung per pcs
-  const valveExtra = useValve ? product.addons.valvePrice : 0;
+  // Usually valve is 600 per pcs as default
+  const valvePrice = product?.addons?.valvePrice ?? 600;
+  const valveExtra = useValve ? valvePrice : 0;
 
   // 3. Kalkulasi Final
   const unitPriceFinal = basePrice + valveExtra;

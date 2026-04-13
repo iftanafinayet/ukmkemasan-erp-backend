@@ -21,6 +21,21 @@ const LandingArticleSchema = new mongoose.Schema({
     trim: true,
     default: '',
   },
+  imageUrl: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  imagePublicId: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  imageAlt: {
+    type: String,
+    trim: true,
+    default: '',
+  },
 }, { _id: true });
 
 const LandingActivitySchema = new mongoose.Schema({

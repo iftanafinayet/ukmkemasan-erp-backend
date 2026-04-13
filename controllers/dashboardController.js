@@ -7,15 +7,29 @@ const User = require('../models/User');
 exports.getCategoryAnalytics = async (req, res) => {
   try {
     const stats = await Order.aggregate([
+      // Filter out orders with missing product reference
+      { $match: { product: { $ne: null } } },
+      
       // 1. Gabungkan dengan data Produk untuk mendapatkan kategori
       {
         $lookup: {
           from: "products",
-          localField: "product",
-          foreignField: "_id",
+          let: { productId: "$product" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $eq: ["$_id", { $toObjectId: "$$productId" }]
+                }
+              }
+            }
+          ],
           as: "productInfo"
         }
       },
+      
+      // Ensure product exists in collection
+      { $match: { "productInfo.0": { $exists: true } } },
       { $unwind: "$productInfo" },
 
       // 2. Kelompokkan berdasarkan kategori produk
@@ -74,20 +88,46 @@ exports.getAdminStats = async (req, res) => {
 
     // 3. Produk Terlaris (Top 5)
     const topProducts = await Order.aggregate([
+      // Filter out orders with missing product reference
+      { $match: { product: { $ne: null } } },
+      
+      // Group by product and sum quantity
       { $group: { _id: "$product", totalSold: { $sum: "$details.quantity" } } },
+      
+      // Sort by most sold
       { $sort: { totalSold: -1 } },
+      
+      // Limit to top 5
       { $limit: 5 },
+      
+      // Lookup product details with conversion to handle potential string/ObjectId mismatch
       {
         $lookup: {
-          from: "products", // Nama koleksi di MongoDB (biasanya plural)
-          localField: "_id",
-          foreignField: "_id",
+          from: "products",
+          let: { productId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $eq: ["$_id", { $toObjectId: "$$productId" }]
+                }
+              }
+            }
+          ],
           as: "productDetail"
         }
       },
+      
+      // Filter out if product not found in products collection
+      { $match: { "productDetail.0": { $exists: true } } },
+      
+      // Unwind the productDetail array
       { $unwind: "$productDetail" },
+      
+      // Project final fields
       {
         $project: {
+          _id: 1,
           name: "$productDetail.name",
           totalSold: 1
         }

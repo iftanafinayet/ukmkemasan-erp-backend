@@ -72,6 +72,9 @@ const sanitizeArticle = (article = {}, existingArticle = null) => ({
   title: normalizeText(article.title),
   date: normalizeText(article.date),
   excerpt: normalizeText(article.excerpt),
+  imageUrl: normalizeText(article.imageUrl || existingArticle?.imageUrl),
+  imagePublicId: normalizeText(article.imagePublicId || existingArticle?.imagePublicId),
+  imageAlt: normalizeText(article.imageAlt || article.title || existingArticle?.imageAlt),
 });
 
 const sanitizeActivity = (activity = {}, existingActivity = null) => ({
@@ -127,9 +130,53 @@ exports.updateLandingContent = async (req, res) => {
     );
     const uploadedFiles = new Map((req.files || []).map((file) => [file.fieldname, file]));
 
-    const nextArticles = articlesPayload
-      .map((article) => sanitizeArticle(article, existingArticlesById.get(String(article._id))))
-      .filter((article) => article.title);
+    const nextArticles = [];
+    const retainedArticleIds = new Set();
+
+    for (const article of articlesPayload) {
+      const existingArticle = existingArticlesById.get(String(article._id)) || null;
+      const clientId = normalizeText(article.clientId || article._id);
+      const uploadField = clientId ? `articleImage:${clientId}` : '';
+      const file = uploadField ? uploadedFiles.get(uploadField) : null;
+      const shouldRemoveImage = article.removeImage === true || article.removeImage === 'true';
+
+      const nextArticle = sanitizeArticle(article, existingArticle);
+
+      if (file) {
+        if (existingArticle?.imagePublicId) {
+          await deleteFromCloudinary(existingArticle.imagePublicId);
+        }
+
+        const uploadedImage = await uploadToCloudinary(file.buffer, 'landing-content');
+        nextArticle.imageUrl = uploadedImage.url;
+        nextArticle.imagePublicId = uploadedImage.publicId;
+        nextArticle.imageAlt = normalizeText(article.imageAlt || article.title || existingArticle?.imageAlt);
+      } else if (shouldRemoveImage) {
+        if (existingArticle?.imagePublicId) {
+          await deleteFromCloudinary(existingArticle.imagePublicId);
+        }
+        nextArticle.imageUrl = '';
+        nextArticle.imagePublicId = '';
+      }
+
+      if (!nextArticle.title) {
+        continue;
+      }
+
+      if (nextArticle._id) {
+        retainedArticleIds.add(String(nextArticle._id));
+      }
+
+      nextArticles.push(nextArticle);
+    }
+
+    // Cleanup deleted article images
+    for (const existingArticle of content.articles || []) {
+      const existingId = String(existingArticle._id);
+      if (!retainedArticleIds.has(existingId) && existingArticle.imagePublicId) {
+        await deleteFromCloudinary(existingArticle.imagePublicId);
+      }
+    }
 
     const retainedActivityIds = new Set();
     const nextActivities = [];
