@@ -24,9 +24,7 @@ const protect = async (req, res, next) => {
 
             return res.status(401).json({ message: 'Invalid token' });
         }
-    }
-
-    if (!token) {
+    } else {
         return res.status(401).json({ message: 'No token provided' });
     }
 };
