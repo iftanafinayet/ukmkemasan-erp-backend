@@ -179,7 +179,10 @@ const buildProductsFromCsv = async () => {
     const descriptionParts = [];
 
     if (product.variants.length > 0) {
-      descriptionParts.push(`Varian ukuran: ${product.variants.map((variant) => variant.size).join(', ')}`);
+      const uniqueSizes = Array.from(new Set(product.variants.map((v) => v.size))).filter(Boolean);
+      if (uniqueSizes.length > 0) {
+        descriptionParts.push(`Varian ukuran: ${uniqueSizes.join(', ')}`);
+      }
     }
     if (materials.length > 0) {
       descriptionParts.push(`Material: ${materials.join(', ')}`);

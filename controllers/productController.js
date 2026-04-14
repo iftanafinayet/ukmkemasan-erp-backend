@@ -183,7 +183,7 @@ exports.getPopularProducts = async (req, res) => {
                 }
             },
             { $sort: { totalQuantity: -1 } },
-            { $limit: 3 }
+            { $limit: 4 }
         ]);
 
         let productIds = salesStats.map(stat => stat._id);
@@ -195,7 +195,7 @@ exports.getPopularProducts = async (req, res) => {
 
         // Jika tidak ada data penjualan, ambil 3 produk terbaru sebagai fallback
         if (products.length === 0) {
-            const fallbackProducts = await Product.find().sort({ createdAt: -1 }).limit(3);
+            const fallbackProducts = await Product.find().sort({ createdAt: -1 }).limit(4);
             return res.json(fallbackProducts.map(p => {
                 const productData = serializeProduct(p);
                 productData.totalSold = 0;
