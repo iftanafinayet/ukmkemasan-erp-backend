@@ -51,6 +51,26 @@ const DEFAULT_LANDING_CONTENT = {
       accent: 'from-amber-500 via-orange-500 to-rose-500',
     },
   ],
+  portfolios: [
+    {
+      clientName: 'Kopi Kenangan',
+      title: 'Packaging Pouch Kopi Premium',
+      category: 'Pouch',
+      description: 'Custom standing pouch dengan valve dan zipper untuk menjaga aroma kopi tetap segar.',
+    },
+    {
+      clientName: 'Snack Brand X',
+      title: 'Kemasan Keripik Alumunium Foil',
+      category: 'Roll Stock',
+      description: 'Laminasi foil kualitas tinggi untuk daya tahan produk yang lebih lama.',
+    },
+    {
+      clientName: 'UMKM Sambal Y',
+      title: 'Botol Sambal Label Shrink',
+      category: 'Label',
+      description: 'Design label eye-catching yang tahan air dan suhu dingin.',
+    },
+  ],
 };
 
 const normalizeText = (value = '') => String(value || '').trim();
@@ -90,6 +110,16 @@ const sanitizeActivity = (activity = {}, existingActivity = null) => ({
   imageAlt: normalizeText(activity.imageAlt || activity.title || existingActivity?.imageAlt),
 });
 
+const sanitizePortfolio = (portfolio = {}, existingPortfolio = null) => ({
+  ...(existingPortfolio?._id ? { _id: existingPortfolio._id } : portfolio._id ? { _id: portfolio._id } : {}),
+  clientName: normalizeText(portfolio.clientName),
+  title: normalizeText(portfolio.title),
+  category: normalizeText(portfolio.category),
+  description: normalizeText(portfolio.description),
+  imageUrl: normalizeText(portfolio.imageUrl || existingPortfolio?.imageUrl),
+  imagePublicId: normalizeText(portfolio.imagePublicId || existingPortfolio?.imagePublicId),
+});
+
 const getOrCreateLandingContent = async () => {
   let content = await LandingContent.findOne({ key: LANDING_CONTENT_KEY });
   if (!content) {
@@ -121,12 +151,16 @@ exports.updateLandingContent = async (req, res) => {
 
     const articlesPayload = Array.isArray(payload.articles) ? payload.articles : [];
     const activitiesPayload = Array.isArray(payload.activities) ? payload.activities : [];
+    const portfoliosPayload = Array.isArray(payload.portfolios) ? payload.portfolios : [];
 
     const existingArticlesById = new Map(
       (content.articles || []).map((article) => [String(article._id), article.toObject ? article.toObject() : article])
     );
     const existingActivitiesById = new Map(
       (content.activities || []).map((activity) => [String(activity._id), activity.toObject ? activity.toObject() : activity])
+    );
+    const existingPortfoliosById = new Map(
+      (content.portfolios || []).map((portfolio) => [String(portfolio._id), portfolio.toObject ? portfolio.toObject() : portfolio])
     );
     const uploadedFiles = new Map((req.files || []).map((file) => [file.fieldname, file]));
 
@@ -225,14 +259,64 @@ exports.updateLandingContent = async (req, res) => {
       }
     }
 
+    const retainedPortfolioIds = new Set();
+    const nextPortfolios = [];
+
+    for (const portfolio of portfoliosPayload) {
+      const existingPortfolio = existingPortfoliosById.get(String(portfolio._id)) || null;
+      const clientId = normalizeText(portfolio.clientId || portfolio._id);
+      const uploadField = clientId ? `portfolioImage:${clientId}` : '';
+      const file = uploadField ? uploadedFiles.get(uploadField) : null;
+      const shouldRemoveImage = portfolio.removeImage === true || portfolio.removeImage === 'true';
+
+      const nextPortfolio = sanitizePortfolio(portfolio, existingPortfolio);
+
+      if (file) {
+        if (existingPortfolio?.imagePublicId) {
+          await deleteFromCloudinary(existingPortfolio.imagePublicId);
+        }
+
+        const uploadedImage = await uploadToCloudinary(file.buffer, 'landing-content');
+        nextPortfolio.imageUrl = uploadedImage.url;
+        nextPortfolio.imagePublicId = uploadedImage.publicId;
+      } else if (shouldRemoveImage) {
+        if (existingPortfolio?.imagePublicId) {
+          await deleteFromCloudinary(existingPortfolio.imagePublicId);
+        }
+        nextPortfolio.imageUrl = '';
+        nextPortfolio.imagePublicId = '';
+      }
+
+      if (!nextPortfolio.clientName) {
+        continue;
+      }
+
+      if (nextPortfolio._id) {
+        retainedPortfolioIds.add(String(nextPortfolio._id));
+      }
+
+      nextPortfolios.push(nextPortfolio);
+    }
+
+    for (const existingPortfolio of content.portfolios || []) {
+      const existingId = String(existingPortfolio._id);
+      if (!retainedPortfolioIds.has(existingId) && existingPortfolio.imagePublicId) {
+        await deleteFromCloudinary(existingPortfolio.imagePublicId);
+      }
+    }
+
     content.articles = nextArticles;
     content.activities = nextActivities;
+    content.portfolios = nextPortfolios;
 
     if (payload.articleSectionConfig) {
       content.articleSectionConfig = payload.articleSectionConfig;
     }
     if (payload.gallerySectionConfig) {
       content.gallerySectionConfig = payload.gallerySectionConfig;
+    }
+    if (payload.portfolioSectionConfig) {
+      content.portfolioSectionConfig = payload.portfolioSectionConfig;
     }
 
     const updatedContent = await content.save();

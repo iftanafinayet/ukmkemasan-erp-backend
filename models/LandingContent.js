@@ -86,6 +86,39 @@ const LandingActivitySchema = new mongoose.Schema({
   },
 }, { _id: true });
 
+const LandingPortfolioSchema = new mongoose.Schema({
+  clientName: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  title: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  category: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  description: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  imageUrl: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  imagePublicId: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+}, { _id: true });
+
 const LandingContentSchema = new mongoose.Schema({
   key: {
     type: String,
@@ -102,6 +135,10 @@ const LandingContentSchema = new mongoose.Schema({
     type: [LandingActivitySchema],
     default: [],
   },
+  portfolios: {
+    type: [LandingPortfolioSchema],
+    default: [],
+  },
   articleSectionConfig: {
     pillText: { type: String, default: 'Informasi Menarik' },
     title: { type: String, default: 'Artikel Pilihan Untuk Meningkatkan Produk Anda' },
@@ -111,6 +148,11 @@ const LandingContentSchema = new mongoose.Schema({
     pillText: { type: String, default: 'Galeri' },
     title: { type: String, default: '' },
     subtitle: { type: String, default: '' },
+  },
+  portfolioSectionConfig: {
+    pillText: { type: String, default: 'Portofolio' },
+    title: { type: String, default: 'Hasil Karya Terbaik Bersama Client Kami' },
+    subtitle: { type: String, default: 'Lihat bagaimana kami membantu berbagai brand meningkatkan nilai jual produk mereka melalui kemasan yang tepat.' },
   },
 }, { timestamps: true });
 
