@@ -5,7 +5,7 @@ const { protect, admin } = require('../middleware/authMiddleware');
 const upload = require('../middleware/uploadMiddleware');
 
 router.route('/')
-  .get(protect, getLandingContent)
+  .get(getLandingContent)
   .put(protect, admin, upload.any(), updateLandingContent);
 
 module.exports = router;

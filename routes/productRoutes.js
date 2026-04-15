@@ -12,13 +12,13 @@ const { protect, admin } = require('../middleware/authMiddleware');
 const upload = require('../middleware/uploadMiddleware');
 
 router.route('/')
-    .get(protect, getProducts)
+    .get(getProducts)
     .post(protect, admin, upload.array('images', 5), createProduct);
 
-router.get('/popular', protect, getPopularProducts);
+router.get('/popular', getPopularProducts);
 
 router.route('/:id')
-    .get(protect, getProductById)
+    .get(getProductById)
     .put(protect, admin, upload.array('images', 5), updateProduct)
     .delete(protect, admin, deleteProduct);
 
