@@ -52,4 +52,15 @@ const paymentReceivedSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+paymentReceivedSchema.index(
+  { referenceNo: 1 },
+  {
+    unique: true,
+    name: 'referenceNo_1_unique',
+    partialFilterExpression: {
+      referenceNo: { $type: 'string', $gt: '' }
+    }
+  }
+);
+
 module.exports = mongoose.model('PaymentReceived', paymentReceivedSchema);

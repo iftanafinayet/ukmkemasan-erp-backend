@@ -6,6 +6,7 @@ const PaymentReceived = require('../models/PaymentReceived');
 const MIDTRANS_API_BASE = 'https://api.midtrans.com';
 const MIDTRANS_SANDBOX_API_BASE = 'https://api.sandbox.midtrans.com';
 const DEFAULT_FRONTEND_URL = 'https://ukmkemasan-erp-frontend.vercel.app';
+const ORDER_STATUS_FLOW = ['Quotation', 'Payment', 'Production', 'Quality Control', 'Shipping', 'Completed'];
 
 const getMidtransConfig = () => {
   const serverKey = process.env.MIDTRANS_SERVER_KEY;
@@ -47,9 +48,12 @@ const resolveInvoiceStatus = (invoice) => {
 };
 
 const generateDocumentNumber = async (Model, prefix) => {
-  const count = await Model.countDocuments();
-  return `${prefix}-${new Date().getFullYear()}-${String(count + 1).padStart(4, '0')}`;
+  const timestamp = Date.now();
+  const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
+  return `${prefix}-${new Date().getFullYear()}-${timestamp}-${randomSuffix}`;
 };
+
+const isDuplicateKeyError = (error) => error?.code === 11000;
 
 const parseInvoiceIdFromMidtransOrderId = (orderId) => {
   const match = String(orderId || '').match(/^INV-([a-f0-9]{24})-\d+$/i);
@@ -163,14 +167,15 @@ const syncOrderPaymentState = async (orderId, invoice) => {
 
   const totalAmount = Number(invoice?.totalAmount || 0);
   const paidAmount = Number(invoice?.paidAmount || 0);
+  const currentStatusRank = ORDER_STATUS_FLOW.indexOf(order.status);
+  const productionStatusRank = ORDER_STATUS_FLOW.indexOf('Production');
 
   order.isPaid = totalAmount > 0 && paidAmount >= totalAmount;
-  
-  // Automate status transition: if paid, move directly to Production
-  if (order.isPaid) {
+
+  // Only advance forward; never downgrade an order that is already beyond production.
+  if (order.isPaid && currentStatusRank >= 0 && currentStatusRank < productionStatusRank) {
     order.status = 'Production';
   } else if (order.status === 'Quotation') {
-    // If not paid yet but moved from Quotation, set to Payment
     order.status = 'Payment';
   }
 
@@ -346,16 +351,16 @@ exports.handleMidtransWebhook = async (req, res) => {
       || (transactionStatus === 'capture' && fraudStatus === 'accept');
 
     if (isSettled) {
-      const existingPayment = await PaymentReceived.findOne({ referenceNo: transactionId });
-      if (!existingPayment) {
-        const paymentAmount = Number(grossAmount) || 0;
-        const outstandingAmount = Math.max(
-          (Number(invoice.totalAmount) || 0) - (Number(invoice.paidAmount) || 0),
-          0
-        );
-        const appliedAmount = Math.min(paymentAmount, outstandingAmount);
+      const paymentReference = transactionId || midtransOrderId;
+      const paymentAmount = Number(grossAmount) || 0;
+      const outstandingAmount = Math.max(
+        (Number(invoice.totalAmount) || 0) - (Number(invoice.paidAmount) || 0),
+        0
+      );
+      const appliedAmount = Math.min(paymentAmount, outstandingAmount);
 
-        if (appliedAmount > 0) {
+      if (appliedAmount > 0) {
+        try {
           await PaymentReceived.create({
             paymentNumber: await generateDocumentNumber(PaymentReceived, 'PAY'),
             invoice: invoice._id,
@@ -364,11 +369,15 @@ exports.handleMidtransWebhook = async (req, res) => {
             amount: appliedAmount,
             paymentDate: settlementTime ? new Date(settlementTime) : new Date(),
             method: mapMidtransMethod(paymentType),
-            referenceNo: transactionId || midtransOrderId,
+            referenceNo: paymentReference,
             notes: `Midtrans ${transactionStatus} (${paymentType || 'unknown'})`,
           });
 
           invoice.paidAmount = (Number(invoice.paidAmount) || 0) + appliedAmount;
+        } catch (error) {
+          if (!isDuplicateKeyError(error)) {
+            throw error;
+          }
         }
       }
     }
