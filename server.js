@@ -18,15 +18,34 @@ const customerRoutes = require('./routes/customerRoutes');
 const inventoryRoutes = require('./routes/inventoryRoutes');
 const salesRoutes = require('./routes/salesRoutes');
 const landingContentRoutes = require('./routes/landingContentRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
+const DEFAULT_BACKEND_URL = 'https://ukmkemasan-erp-backend-production.up.railway.app';
+const DEFAULT_FRONTEND_URL = 'https://ukmkemasan-erp-frontend.vercel.app';
+
+connectDB();
+const app = express();
+const backendUrl = process.env.BACKEND_URL || DEFAULT_BACKEND_URL;
+const frontendUrl = process.env.FRONTEND_URL || DEFAULT_FRONTEND_URL;
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || [
+  'http://localhost:5173',
+  frontendUrl,
+  backendUrl,
+].join(','))
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 const corsOptions = {
-  origin: ['http://localhost:5173', 'https://ukmkemasan-erp-frontend.vercel.app'],
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS origin not allowed: ${origin}`));
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 };
-
-connectDB();
-const app = express();
 
 // Middleware
 app.use(express.json());
@@ -38,7 +57,11 @@ if (process.env.NODE_ENV === 'development') {
 
 // ROUTE DASAR
 app.get('/', (req, res) => {
-  res.send('API is Running');
+  res.json({
+    message: 'API is Running',
+    url: backendUrl,
+    frontendUrl,
+  });
 });
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
@@ -49,6 +72,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/sales', salesRoutes);
+app.use('/api/payments', paymentRoutes);
 app.use('/api/landing-content', landingContentRoutes);
 
 app.use(notFound);

@@ -137,6 +137,13 @@ exports.getOrderById = async (req, res) => {
       .populate('product', 'name category material priceB2C priceB2B');
 
     if (order) {
+      const isOwner = String(order.customer?._id || order.customer) === String(req.user?._id);
+      const isAdmin = req.user?.role === 'admin';
+
+      if (!isOwner && !isAdmin) {
+        return res.status(403).json({ message: 'Akses ditolak untuk detail order ini' });
+      }
+
       res.json(order);
     } else {
       res.status(404).json({ message: 'Order tidak ditemukan' });
