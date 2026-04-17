@@ -310,7 +310,11 @@ exports.getOrderPaymentSummary = async (req, res) => {
     invoice.status = resolveInvoiceStatus(invoice);
     await invoice.save();
 
-    const summary = await buildPaymentSummary(order, invoice);
+    const refreshedOrder = await Order.findById(order._id)
+      .populate('customer', 'name email phone')
+      .populate('product', 'name sku category');
+
+    const summary = await buildPaymentSummary(refreshedOrder || order, invoice);
 
     res.json({
       ...summary,
