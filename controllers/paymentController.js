@@ -165,7 +165,12 @@ const syncOrderPaymentState = async (orderId, invoice) => {
   const paidAmount = Number(invoice?.paidAmount || 0);
 
   order.isPaid = totalAmount > 0 && paidAmount >= totalAmount;
-  if (order.status === 'Quotation') {
+  
+  // Automate status transition: if paid, move directly to Production
+  if (order.isPaid) {
+    order.status = 'Production';
+  } else if (order.status === 'Quotation') {
+    // If not paid yet but moved from Quotation, set to Payment
     order.status = 'Payment';
   }
 
