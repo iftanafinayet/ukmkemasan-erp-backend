@@ -22,7 +22,6 @@ const paymentRoutes = require('./routes/paymentRoutes');
 const DEFAULT_BACKEND_URL = 'https://ukmkemasan-erp-backend-production.up.railway.app';
 const DEFAULT_FRONTEND_URL = 'https://ukmkemasan-erp-frontend.vercel.app';
 
-connectDB();
 const app = express();
 const backendUrl = process.env.BACKEND_URL || DEFAULT_BACKEND_URL;
 const frontendUrl = process.env.FRONTEND_URL || DEFAULT_FRONTEND_URL;
@@ -80,6 +79,15 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server is running on port ${PORT}`);
+const startServer = async () => {
+  await connectDB();
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+};
+
+startServer().catch((error) => {
+  console.error(`Failed to start server: ${error.message}`);
+  process.exit(1);
 });
