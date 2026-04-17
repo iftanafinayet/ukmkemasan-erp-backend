@@ -213,6 +213,83 @@ const requestMidtransSnapToken = async (payload) => {
   return data;
 };
 
+const fetchMidtransTransactionStatus = async (midtransOrderId) => {
+  const { serverKey, apiBaseUrl } = getMidtransConfig();
+  if (!serverKey) return null;
+
+  // Midtrans Status API is on the base API URL, not Snap URL
+  // apiBaseUrl is already base (https://api.sandbox.midtrans.com)
+  try {
+    const response = await fetch(`${apiBaseUrl}/v2/${midtransOrderId}/status`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: buildMidtransAuthHeader(serverKey),
+      },
+    });
+
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (error) {
+    console.error('[Midtrans] Error fetching status:', error.message);
+    return null;
+  }
+};
+
+const processSettledTransaction = async (invoice, midtransData) => {
+  const {
+    transaction_status: transactionStatus,
+    fraud_status: fraudStatus,
+    transaction_id: transactionId,
+    payment_type: paymentType,
+    gross_amount: grossAmount,
+    settlement_time: settlementTime,
+    order_id: midtransOrderId,
+  } = midtransData;
+
+  const isSettled = transactionStatus === 'settlement'
+    || (transactionStatus === 'capture' && fraudStatus === 'accept');
+
+  if (!isSettled) return false;
+
+  const paymentReference = transactionId || midtransOrderId;
+  const existingPayment = await PaymentReceived.findOne({ referenceNo: paymentReference });
+  
+  if (!existingPayment) {
+    const paymentAmount = Number(grossAmount) || 0;
+    const outstandingAmount = Math.max(
+      (Number(invoice.totalAmount) || 0) - (Number(invoice.paidAmount) || 0),
+      0
+    );
+    const appliedAmount = Math.min(paymentAmount, outstandingAmount);
+
+    if (appliedAmount > 0) {
+      try {
+        await PaymentReceived.create({
+          paymentNumber: await generateDocumentNumber(PaymentReceived, 'PAY'),
+          invoice: invoice._id,
+          order: invoice.order,
+          customer: invoice.customer,
+          amount: appliedAmount,
+          paymentDate: settlementTime ? new Date(settlementTime) : new Date(),
+          method: mapMidtransMethod(paymentType),
+          referenceNo: paymentReference,
+          notes: `Midtrans Sync ${transactionStatus} (${paymentType || 'unknown'})`,
+        });
+
+        invoice.paidAmount = (Number(invoice.paidAmount) || 0) + appliedAmount;
+        invoice.status = resolveInvoiceStatus(invoice);
+        await invoice.save();
+        await syncOrderPaymentState(invoice.order, invoice);
+        return true;
+      } catch (error) {
+        if (!isDuplicateKeyError(error)) throw error;
+      }
+    }
+  }
+  return false;
+};
+
 exports.getOrderPaymentSummary = async (req, res) => {
   try {
     const { order, error } = await ensureCustomerOrderAccess(req.params.orderId, req.user);
@@ -221,6 +298,15 @@ exports.getOrderPaymentSummary = async (req, res) => {
     }
 
     const invoice = await ensureInvoiceForOrder(order, req.user?._id);
+
+    // Sync with Midtrans if we have a transaction ID
+    if (invoice.lastMidtransOrderId && invoice.status !== 'Paid') {
+      const midtransStatus = await fetchMidtransTransactionStatus(invoice.lastMidtransOrderId);
+      if (midtransStatus) {
+        await processSettledTransaction(invoice, midtransStatus);
+      }
+    }
+
     invoice.status = resolveInvoiceStatus(invoice);
     await invoice.save();
 
@@ -260,6 +346,11 @@ exports.createMidtransSnapToken = async (req, res) => {
     }
 
     const transactionOrderId = `INV-${String(invoice._id)}-${Date.now()}`;
+    
+    // Save identifying transaction ID for later sync
+    invoice.lastMidtransOrderId = transactionOrderId;
+    await invoice.save();
+
     const { frontendUrl } = getMidtransConfig();
     const baseFrontendUrl = frontendUrl;
     const paymentPageUrl = `${baseFrontendUrl}/portal/orders/${order._id}/payment`;
@@ -321,11 +412,6 @@ exports.handleMidtransWebhook = async (req, res) => {
       status_code: statusCode,
       gross_amount: grossAmount,
       signature_key: signatureKey,
-      transaction_status: transactionStatus,
-      fraud_status: fraudStatus,
-      transaction_id: transactionId,
-      payment_type: paymentType,
-      settlement_time: settlementTime,
     } = req.body || {};
 
     const expectedSignature = crypto
@@ -347,51 +433,16 @@ exports.handleMidtransWebhook = async (req, res) => {
       return res.status(404).json({ message: 'Invoice tidak ditemukan untuk transaksi ini' });
     }
 
-    const isSettled = transactionStatus === 'settlement'
-      || (transactionStatus === 'capture' && fraudStatus === 'accept');
-
-    if (isSettled) {
-      const paymentReference = transactionId || midtransOrderId;
-      const paymentAmount = Number(grossAmount) || 0;
-      const outstandingAmount = Math.max(
-        (Number(invoice.totalAmount) || 0) - (Number(invoice.paidAmount) || 0),
-        0
-      );
-      const appliedAmount = Math.min(paymentAmount, outstandingAmount);
-
-      if (appliedAmount > 0) {
-        try {
-          await PaymentReceived.create({
-            paymentNumber: await generateDocumentNumber(PaymentReceived, 'PAY'),
-            invoice: invoice._id,
-            order: invoice.order,
-            customer: invoice.customer,
-            amount: appliedAmount,
-            paymentDate: settlementTime ? new Date(settlementTime) : new Date(),
-            method: mapMidtransMethod(paymentType),
-            referenceNo: paymentReference,
-            notes: `Midtrans ${transactionStatus} (${paymentType || 'unknown'})`,
-          });
-
-          invoice.paidAmount = (Number(invoice.paidAmount) || 0) + appliedAmount;
-        } catch (error) {
-          if (!isDuplicateKeyError(error)) {
-            throw error;
-          }
-        }
-      }
-    }
-
-    invoice.status = resolveInvoiceStatus(invoice);
-    await invoice.save();
-    await syncOrderPaymentState(invoice.order, invoice);
+    // Use helper to process payment and update status
+    await processSettledTransaction(invoice, req.body);
 
     res.json({
       received: true,
       invoiceId: invoice._id,
-      transactionStatus,
+      status: invoice.status,
     });
   } catch (error) {
+    console.error('[Midtrans Webhook Error]:', error.message);
     res.status(500).json({ message: error.message });
   }
 };

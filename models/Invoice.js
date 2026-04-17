@@ -68,6 +68,10 @@ const invoiceSchema = new mongoose.Schema({
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  },
+  lastMidtransOrderId: {
+    type: String,
+    trim: true
   }
 }, { timestamps: true });
 
