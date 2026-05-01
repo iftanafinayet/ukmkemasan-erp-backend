@@ -49,8 +49,25 @@ exports.loginUser = async (req, res) => {
   try {
     const user = await User.findOne({ email });
 
-    // Cek apakah user ada DAN password cocok
-    if (user && (await user.matchPassword(password))) {
+    if (!user) {
+      return res.status(401).json({ message: 'Email atau password salah' });
+    }
+
+    // Cek apakah akun terkunci
+    if (user.lockUntil && user.lockUntil > Date.now()) {
+      const lockTimeRemaining = Math.ceil((user.lockUntil - Date.now()) / 60000);
+      return res.status(403).json({
+        message: `Akun Anda terkunci sementara karena terlalu banyak percobaan login. Silakan coba lagi dalam ${lockTimeRemaining} menit.`,
+      });
+    }
+
+    // Cek apakah password cocok
+    if (await user.matchPassword(password)) {
+      // Reset login attempts setelah login berhasil
+      user.loginAttempts = 0;
+      user.lockUntil = undefined;
+      await user.save();
+
       res.json({
         _id: user._id,
         name: user.name,
@@ -58,6 +75,15 @@ exports.loginUser = async (req, res) => {
         token: generateToken(user)
       });
     } else {
+      // Tambah percobaan login yang gagal
+      user.loginAttempts = (user.loginAttempts || 0) + 1;
+
+      // Kunci akun jika sudah 5 kali gagal
+      if (user.loginAttempts >= 5) {
+        user.lockUntil = Date.now() + 30 * 60 * 1000; // kunci selama 30 menit
+      }
+
+      await user.save();
       res.status(401).json({ message: 'Email atau password salah' });
     }
   } catch (error) {

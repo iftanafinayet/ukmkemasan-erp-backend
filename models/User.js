@@ -22,6 +22,14 @@ const userSchema = new mongoose.Schema({
     },
     phone: String,
     address: String,
+    loginAttempts: {
+        type: Number,
+        required: true,
+        default: 0
+    },
+    lockUntil: {
+        type: Date
+    },
 }, { timestamps: true });
 
 // Enskripsi Password Menggunakan Hash

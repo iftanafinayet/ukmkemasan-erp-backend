@@ -80,13 +80,39 @@ exports.createOrder = async (req, res) => {
     const savedOrder = await order.save();
 
     // 7. POTONG STOK OTOMATIS
-    // Setelah order berhasil dibuat, kita kurangi stok di koleksi Product
+    // Menggunakan atomic update untuk mencegah race condition & stok negatif
+    let remainingStock;
     if (selectedVariant) {
-      selectedVariant.stock = Math.max(0, (selectedVariant.stock || 0) - qty);
+      const updatedProduct = await Product.findOneAndUpdate(
+        { 
+          _id: productId, 
+          'variants._id': variantId, 
+          'variants.stock': { $gte: qty } 
+        },
+        { $inc: { 'variants.$.stock': -qty } },
+        { new: true }
+      );
+
+      if (!updatedProduct) {
+        // Jika gagal update, berarti stok berkurang saat proses berlangsung
+        return res.status(400).json({ message: 'Stok baru saja habis atau tidak mencukupi' });
+      }
+      remainingStock = updatedProduct.variants.id(variantId).stock;
     } else {
-      product.stockPolos = Math.max(0, (product.stockPolos || 0) - qty);
+      const updatedProduct = await Product.findOneAndUpdate(
+        { 
+          _id: productId, 
+          stockPolos: { $gte: qty } 
+        },
+        { $inc: { stockPolos: -qty } },
+        { new: true }
+      );
+
+      if (!updatedProduct) {
+        return res.status(400).json({ message: 'Stok baru saja habis atau tidak mencukupi' });
+      }
+      remainingStock = updatedProduct.stockPolos;
     }
-    await product.save();
 
     const defaultWarehouse = await Warehouse.findOne({ type: 'Main', isActive: true }).sort({ createdAt: 1 });
     await StockCard.create({
@@ -96,7 +122,7 @@ exports.createOrder = async (req, res) => {
       referenceId: savedOrder._id,
       referenceNo: savedOrder.orderNumber,
       quantityChange: -qty,
-      balanceAfter: product.stockPolos,
+      balanceAfter: remainingStock,
       note: selectedVariant
         ? `Pengurangan stok varian ${selectedVariant.size}/${selectedVariant.color} untuk order ${savedOrder.orderNumber}`
         : `Pengurangan stok untuk order ${savedOrder.orderNumber}`
@@ -159,9 +185,47 @@ exports.updateOrderStatus = async (req, res) => {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ message: 'Order tidak ditemukan' });
 
-    order.status = req.body.status || order.status;
+    const oldStatus = order.status;
+    const newStatus = req.body.status || order.status;
     order.isPaid = req.body.isPaid !== undefined ? req.body.isPaid : order.isPaid;
 
+    // LOGIKA RESTORASI STOK: Jika status berubah menjadi 'Cancelled'
+    if (oldStatus !== 'Cancelled' && newStatus === 'Cancelled') {
+      const { productId, quantity, variantId } = order.details; //- Note: variantId is in details
+      const qty = parseInt(quantity);
+
+      let remainingStock;
+      if (variantId) {
+        const updatedProduct = await Product.findOneAndUpdate(
+          { _id: productId, 'variants._id': variantId },
+          { $inc: { 'variants.$.stock': qty } },
+          { new: true }
+        );
+        remainingStock = updatedProduct?.variants.id(variantId)?.stock;
+      } else {
+        const updatedProduct = await Product.findOneAndUpdate(
+          { _id: productId },
+          { $inc: { stockPolos: qty } },
+          { new: true }
+        );
+        remainingStock = updatedProduct?.stockPolos;
+      }
+
+      // Catat di StockCard
+      const defaultWarehouse = await Warehouse.findOne({ type: 'Main', isActive: true }).sort({ createdAt: 1 });
+      await StockCard.create({
+        product: productId,
+        warehouse: defaultWarehouse?._id,
+        referenceType: 'Order',
+        referenceId: order._id,
+        referenceNo: order.orderNumber,
+        quantityChange: qty,
+        balanceAfter: remainingStock,
+        note: `Restorasi stok karena order ${order.orderNumber} dibatalkan`
+      });
+    }
+
+    order.status = newStatus;
     const updatedOrder = await order.save();
     res.json(updatedOrder);
   } catch (error) {
