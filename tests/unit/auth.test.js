@@ -3,6 +3,8 @@ const app = require('../../app');
 const User = require('../../models/User');
 const jwt = require('jsonwebtoken');
 
+process.env.JWT_SECRET = 'test-secret-key';
+
 jest.mock('../../models/User');
 jest.mock('../../config/db');
 

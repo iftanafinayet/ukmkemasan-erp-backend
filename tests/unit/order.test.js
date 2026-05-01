@@ -48,7 +48,7 @@ describe('Order Controller Unit Tests', () => {
           id: jest.fn().mockReturnValue({ stock: 900 })
         }
       });
-      Warehouse.findOne.mockResolvedValue({ _id: 'wh123', name: 'Main Warehouse' });
+      Warehouse.findOne.mockReturnValue({ sort: jest.fn().mockResolvedValue({ _id: 'wh123', name: 'Main Warehouse' }) });
       StockCard.create.mockResolvedValue({});
 
       const res = await request(app)
@@ -106,18 +106,24 @@ describe('Order Controller Unit Tests', () => {
 
   describe('PUT /api/orders/:id/status', () => {
     it('should update order status as admin', async () => {
-      Order.findById.mockResolvedValue({
+      const mockOrder = {
         _id: 'order123',
+        orderNumber: 'UKM-2026-0001',
         status: 'Pending',
+        isPaid: false,
         details: { productId: 'prod123', quantity: 100 },
-        save: jest.fn().mockResolvedValue({
-          status: 'Cancelled'
+        save: jest.fn().mockImplementation(function () {
+          return Promise.resolve(mockOrder);
+        }),
+        toJSON: jest.fn().mockImplementation(function () {
+          return { ...mockOrder };
         })
-      });
+      };
+      Order.findById.mockResolvedValue(mockOrder);
       Product.findOneAndUpdate.mockResolvedValue({
         stockPolos: 1100
       });
-      Warehouse.findOne.mockResolvedValue({ _id: 'wh123' });
+      Warehouse.findOne.mockReturnValue({ sort: jest.fn().mockResolvedValue({ _id: 'wh123' }) });
       StockCard.create.mockResolvedValue({});
 
       const res = await request(app)
