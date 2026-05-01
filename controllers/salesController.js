@@ -5,6 +5,7 @@ const Product = require('../models/Product');
 const SalesReturn = require('../models/SalesReturn');
 const StockCard = require('../models/StockCard');
 const Warehouse = require('../models/Warehouse');
+const xlsx = require('xlsx');
 
 const SALES_INVOICE_PREFIX = 'INV';
 const SALES_PAYMENT_PREFIX = 'PAY';
@@ -481,5 +482,80 @@ exports.createSalesReturn = async (req, res) => {
     res.status(201).json(createdReturn);
   } catch (error) {
     res.status(400).json({ message: error.message });
+  }
+};
+
+// @desc    Export Invoices to Excel
+// @route   GET /api/sales/export-invoices
+exports.exportInvoices = async (req, res) => {
+  try {
+    const invoices = await populateInvoiceQuery(
+      Invoice.find({}).sort({ issuedDate: -1, createdAt: -1 })
+    );
+
+    const data = invoices.map((inv) => ({
+      'Invoice Number': inv.invoiceNumber,
+      'Customer': inv.customer?.name || 'N/A',
+      'Product': inv.product?.name || 'N/A',
+      'Quantity': inv.quantity,
+      'Unit Price': inv.unitPrice,
+      'Total Amount': inv.totalAmount,
+      'Paid Amount': inv.paidAmount,
+      'Outstanding': Math.max((Number(inv.totalAmount) || 0) - (Number(inv.paidAmount) || 0), 0),
+      'Issued Date': inv.issuedDate ? inv.issuedDate.toISOString().split('T')[0] : 'N/A',
+      'Due Date': inv.dueDate ? inv.dueDate.toISOString().split('T')[0] : 'N/A',
+      'Status': inv.status,
+    }));
+
+    const worksheet = xlsx.utils.json_to_sheet(data);
+    const workbook = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'Invoices');
+
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=invoices_export.xlsx');
+    res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Export Sales Overview to Excel
+// @route   GET /api/sales/export-overview
+exports.exportSalesOverview = async (req, res) => {
+  try {
+    const [orders, invoices, returns] = await Promise.all([
+      Order.find({}).populate('customer', 'name').populate('product', 'name').sort({ createdAt: -1 }),
+      populateInvoiceQuery(Invoice.find({}).sort({ issuedDate: -1, createdAt: -1 })),
+      populateReturnQuery(SalesReturn.find({}).sort({ returnDate: -1, createdAt: -1 })),
+    ]);
+
+    const processing = buildProcessingRows({ orders, invoices, returns });
+
+    const data = processing.map((item) => ({
+      'Order Number': item.orderNumber,
+      'Customer': item.customer?.name || 'N/A',
+      'Product': item.product?.name || 'N/A',
+      'Quantity': item.details?.quantity || 0,
+      'Total Amount': item.totalPrice || 0,
+      'Payment Total': item.paymentTotal || 0,
+      'Outstanding': item.outstandingAmount || 0,
+      'Return Qty': item.returnQuantity || 0,
+      'Return Amount': item.returnAmount || 0,
+      'Status': item.commercialStatus,
+    }));
+
+    const worksheet = xlsx.utils.json_to_sheet(data);
+    const workbook = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'Sales Overview');
+
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=sales_overview_export.xlsx');
+    res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 };

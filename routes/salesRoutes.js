@@ -5,6 +5,8 @@ const {
   getSalesOverview,
   getInvoices,
   createInvoice,
+  exportInvoices,
+  exportSalesOverview,
   getPayments,
   createPayment,
   getSalesReturns,
@@ -14,10 +16,13 @@ const {
 router.use(protect, admin);
 
 router.get('/overview', getSalesOverview);
+router.get('/overview/export', exportSalesOverview);
 
 router.route('/invoices')
   .get(getInvoices)
   .post(createInvoice);
+
+router.get('/invoices/export', exportInvoices);
 
 router.route('/payments')
   .get(getPayments)

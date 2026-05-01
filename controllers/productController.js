@@ -1,5 +1,6 @@
 const Product = require('../models/Product');
 const { uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary');
+const xlsx = require('xlsx');
 
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object || {}, key);
 const normalizeWhitespace = (value = '') => String(value).replace(/\s+/g, ' ').trim();
@@ -372,6 +373,41 @@ exports.deleteProduct = async (req, res) => {
 
         await Product.findByIdAndDelete(req.params.id);
         res.json({ message: 'Produk berhasil dihapus' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// @desc    Export Products to Excel
+// @route   GET /api/products/export
+exports.exportProducts = async (req, res) => {
+    try {
+        const products = await Product.find({}).sort({ category: 1, name: 1 });
+        
+        const data = products.map(p => {
+            const productData = serializeProduct(p);
+            return {
+                'Product Name': productData.name,
+                'SKU': productData.sku,
+                'Category': productData.category,
+                'Material': productData.material,
+                'Stock': productData.stockPolos,
+                'Min Order': productData.minOrder,
+                'Variants Count': productData.variants.length,
+                'Price B2C': productData.priceB2C,
+                'Price B2B': productData.priceB2B,
+            };
+        });
+
+        const worksheet = xlsx.utils.json_to_sheet(data);
+        const workbook = xlsx.utils.book_new();
+        xlsx.utils.book_append_sheet(workbook, worksheet, 'Products');
+
+        const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename=products_export.xlsx');
+        res.send(buffer);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }

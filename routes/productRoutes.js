@@ -6,7 +6,8 @@ const {
     getProductById, 
     createProduct, 
     updateProduct, 
-    deleteProduct 
+    deleteProduct,
+    exportProducts
 } = require('../controllers/productController');
 const { protect, admin } = require('../middleware/authMiddleware');
 const upload = require('../middleware/uploadMiddleware');
@@ -16,6 +17,7 @@ router.route('/')
     .post(protect, admin, upload.array('images', 5), createProduct);
 
 router.get('/popular', getPopularProducts);
+router.get('/export', protect, admin, exportProducts);
 
 router.route('/:id')
     .get(getProductById)
