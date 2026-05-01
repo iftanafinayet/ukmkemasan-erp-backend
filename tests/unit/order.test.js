@@ -27,11 +27,12 @@ describe('Order Controller Unit Tests', () => {
       Product.findById.mockResolvedValue({
         _id: 'prod123',
         name: 'Test Product',
+        sku: 'TEST-SKU',
+        material: 'Plastic',
         variants: {
-          id: jest.fn().mockReturnValue({ sku: 'SKU1', stock: 1000, size: '10x10', color: 'Clear' })
+          id: jest.fn().mockReturnValue({ _id: 'var123', sku: 'SKU1', stock: 1000, size: '10x10', color: 'Clear' })
         },
         stockPolos: 1000,
-        material: 'Plastic'
       });
       Order.countDocuments.mockResolvedValue(10);
       Order.prototype.save = jest.fn().mockResolvedValue({
