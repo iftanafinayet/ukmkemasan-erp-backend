@@ -8,7 +8,7 @@ const {
   updateOrderDesign
 } = require('../controllers/orderController');
 const { protect, admin } = require('../middleware/authMiddleware');
-const upload = require('../middleware/uploadMiddleware');
+const { upload } = require('../middleware/uploadMiddleware');
 
 // 1. Rute Statis (WAJIB DI ATAS)
 router.get('/myorders', protect, getMyOrders);

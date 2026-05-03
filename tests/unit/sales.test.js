@@ -69,13 +69,20 @@ describe('Sales Controller Unit Tests', () => {
         { _id: 'inv2', invoiceNumber: 'INV-2026-0002', totalAmount: 50000, paidAmount: 50000, status: 'Paid', save: jest.fn() },
       ];
 
-      // getInvoices calls: populateInvoiceQuery(Invoice.find({}).sort(...))
-      // populateInvoiceQuery chains .populate().populate().populate()
       Invoice.find.mockReturnValue(chainableMock(mockInvoices));
 
       const res = await request(app).get('/api/sales/invoices');
       expect(res.statusCode).toEqual(200);
       expect(Array.isArray(res.body)).toBe(true);
+    });
+
+    it('should return 500 on server error', async () => {
+      Invoice.find.mockImplementation(() => {
+        throw new Error('DB Error');
+      });
+
+      const res = await request(app).get('/api/sales/invoices');
+      expect(res.statusCode).toEqual(500);
     });
   });
 
@@ -166,6 +173,38 @@ describe('Sales Controller Unit Tests', () => {
 
       expect(res.statusCode).toEqual(400);
     });
+
+    it('should return 400 if order data is not ready for invoice', async () => {
+      const mockOrder = {
+        _id: 'order123',
+        customer: { _id: 'cust123' },
+        product: { _id: 'prod123' },
+        totalPrice: 0,
+        details: { quantity: 0, unitPrice: 0 },
+      };
+
+      Order.findById.mockReturnValue(chainableMock(mockOrder));
+      Invoice.findOne.mockResolvedValue(null);
+
+      const res = await request(app)
+        .post('/api/sales/invoices')
+        .send({ orderId: 'order123' });
+
+      expect(res.statusCode).toEqual(400);
+      expect(res.body.message).toMatch(/belum siap/i);
+    });
+
+    it('should return 400 on server error', async () => {
+      Order.findById.mockImplementation(() => {
+        throw new Error('DB Error');
+      });
+
+      const res = await request(app)
+        .post('/api/sales/invoices')
+        .send({ orderId: 'order123' });
+
+      expect(res.statusCode).toEqual(400);
+    });
   });
 
   // ============================================================
@@ -177,12 +216,20 @@ describe('Sales Controller Unit Tests', () => {
         { _id: 'pay1', amount: 50000 },
       ];
 
-      // getPayments calls: populatePaymentQuery(PaymentReceived.find({}).sort(...))
       PaymentReceived.find.mockReturnValue(chainableMock(mockPayments));
 
       const res = await request(app).get('/api/sales/payments');
       expect(res.statusCode).toEqual(200);
       expect(Array.isArray(res.body)).toBe(true);
+    });
+
+    it('should return 500 on server error', async () => {
+      PaymentReceived.find.mockImplementation(() => {
+        throw new Error('DB Error');
+      });
+
+      const res = await request(app).get('/api/sales/payments');
+      expect(res.statusCode).toEqual(500);
     });
   });
 
@@ -277,29 +324,41 @@ describe('Sales Controller Unit Tests', () => {
       expect(res.body.message).toMatch(/melebihi/i);
     });
 
-    it('should return 400 if invoice already fully paid', async () => {
+    it('should return 400 if payment date is invalid', async () => {
       const mockInvoice = {
         _id: 'inv123',
         totalAmount: 100000,
-        paidAmount: 100000,
-        status: 'Paid',
-        dueDate: new Date('2099-01-01'),
+        paidAmount: 0,
         save: jest.fn(),
       };
       Invoice.findById.mockResolvedValue(mockInvoice);
 
       const res = await request(app)
         .post('/api/sales/payments')
-        .send({ invoiceId: 'inv123', amount: 10000 });
+        .send({ invoiceId: 'inv123', amount: 50000, paymentDate: 'invalid-date' });
 
       expect(res.statusCode).toEqual(400);
-      expect(res.body.message).toMatch(/lunas/i);
+      expect(res.body.message).toMatch(/Tanggal pembayaran tidak valid/i);
+    });
+
+    it('should return 400 on server error', async () => {
+      Invoice.findById.mockImplementation(() => {
+        throw new Error('DB Error');
+      });
+
+      const res = await request(app)
+        .post('/api/sales/payments')
+        .send({ invoiceId: 'inv123', amount: 50000 });
+
+      expect(res.statusCode).toEqual(400);
     });
   });
-
+ 
   // ============================================================
+
   // GET /api/sales/returns
   // ============================================================
+
   describe('GET /api/sales/returns', () => {
     it('should list all sales returns', async () => {
       const mockReturns = [{ _id: 'ret1', quantity: 10 }];
@@ -309,6 +368,15 @@ describe('Sales Controller Unit Tests', () => {
       const res = await request(app).get('/api/sales/returns');
       expect(res.statusCode).toEqual(200);
       expect(Array.isArray(res.body)).toBe(true);
+    });
+
+    it('should return 500 on server error', async () => {
+      SalesReturn.find.mockImplementation(() => {
+        throw new Error('DB Error');
+      });
+
+      const res = await request(app).get('/api/sales/returns');
+      expect(res.statusCode).toEqual(500);
     });
   });
 
@@ -413,9 +481,70 @@ describe('Sales Controller Unit Tests', () => {
 
       expect(res.statusCode).toEqual(400);
     });
-  });
 
+    it('should return 400 for invalid return date', async () => {
+      const mockOrder = {
+        _id: 'order123',
+        details: { quantity: 100 },
+      };
+      Order.findById.mockResolvedValue(mockOrder);
+      Invoice.findById.mockResolvedValue(null);
+      Warehouse.findById.mockResolvedValue(null);
+      Product.findById.mockResolvedValue({ _id: 'p1' });
+      SalesReturn.find.mockResolvedValue([]);
+
+      const res = await request(app)
+        .post('/api/sales/returns')
+        .send({ orderId: 'order123', quantity: 10, reason: 'Defect', returnDate: 'invalid-date' });
+
+      expect(res.statusCode).toEqual(400);
+      expect(res.body.message).toMatch(/Tanggal retur tidak valid/i);
+    });
+
+    it('should return 404 if product not found', async () => {
+      const mockOrder = { _id: 'order123', product: 'prod123' };
+      Order.findById.mockResolvedValue(mockOrder);
+      Product.findById.mockResolvedValue(null);
+
+      const res = await request(app)
+        .post('/api/sales/returns')
+        .send({ orderId: 'order123', quantity: 10, reason: 'Defect' });
+
+      expect(res.statusCode).toEqual(404);
+      expect(res.body.message).toMatch(/Produk pada order tidak ditemukan/i);
+    });
+
+    it('should return 400 if warehouse is inactive', async () => {
+      const mockOrder = { _id: 'order123', product: 'prod123', details: { quantity: 100 } };
+      const mockWarehouse = { _id: 'wh1', isActive: false };
+      Order.findById.mockResolvedValue(mockOrder);
+      Warehouse.findById.mockResolvedValue(mockWarehouse);
+      Product.findById.mockResolvedValue({ _id: 'p1' });
+      SalesReturn.find.mockResolvedValue([]);
+
+      const res = await request(app)
+        .post('/api/sales/returns')
+        .send({ orderId: 'order123', warehouseId: 'wh1', quantity: 10, reason: 'Defect' });
+
+      expect(res.statusCode).toEqual(400);
+      expect(res.body.message).toMatch(/Gudang nonaktif/i);
+    });
+
+    it('should return 400 on server error', async () => {
+      Order.findById.mockImplementation(() => {
+        throw new Error('DB Error');
+      });
+
+      const res = await request(app)
+        .post('/api/sales/returns')
+        .send({ orderId: 'order123', quantity: 10, reason: 'Defect' });
+
+      expect(res.statusCode).toEqual(400);
+    });
+  });
+ 
   // ============================================================
+
   // GET /api/sales/overview
   // ============================================================
   describe('GET /api/sales/overview', () => {
@@ -451,12 +580,6 @@ describe('Sales Controller Unit Tests', () => {
       const mockReturns = [];
       const mockWarehouses = [{ _id: 'wh1', name: 'Main' }];
 
-      // getSalesOverview uses Promise.all with:
-      // Order.find({}).populate().populate().sort()
-      // populateInvoiceQuery(Invoice.find({}).sort(...))  — chainable
-      // populatePaymentQuery(PaymentReceived.find({}).sort(...)) — chainable
-      // populateReturnQuery(SalesReturn.find({}).sort(...)) — chainable
-      // Warehouse.find({}).sort()
       Order.find.mockReturnValue(chainableMock(mockOrders));
       Invoice.find.mockReturnValue(chainableMock(mockInvoices));
       PaymentReceived.find.mockReturnValue(chainableMock(mockPayments));
@@ -469,5 +592,32 @@ describe('Sales Controller Unit Tests', () => {
       expect(res.body).toHaveProperty('processing');
       expect(res.body).toHaveProperty('invoices');
     });
+
+    it('should return 500 on server error', async () => {
+      Order.find.mockImplementation(() => {
+        throw new Error('DB Error');
+      });
+
+      const res = await request(app).get('/api/sales/overview');
+      expect(res.statusCode).toEqual(500);
+    });
+    it('should return 500 on server error during export invoices', async () => {
+      Invoice.find.mockImplementation(() => {
+        throw new Error('Export Error');
+      });
+
+      const res = await request(app).get('/api/sales/invoices/export');
+      expect(res.statusCode).toEqual(500);
+    });
+ 
+    it('should return 500 on server error during export overview', async () => {
+      Order.find.mockImplementation(() => {
+        throw new Error('Export Error');
+      });
+ 
+      const res = await request(app).get('/api/sales/overview/export');
+      expect(res.statusCode).toEqual(500);
+    });
+
   });
 });

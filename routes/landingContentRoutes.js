@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getLandingContent, updateLandingContent } = require('../controllers/landingContentController');
 const { protect, admin } = require('../middleware/authMiddleware');
-const upload = require('../middleware/uploadMiddleware');
+const { upload } = require('../middleware/uploadMiddleware');
 
 router.route('/')
   .get(getLandingContent)
