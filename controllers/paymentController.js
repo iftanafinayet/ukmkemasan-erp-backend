@@ -1,0 +1,530 @@
+const crypto = require('crypto');
+const Invoice = require('../models/Invoice');
+const Order = require('../models/Order');
+const PaymentReceived = require('../models/PaymentReceived');
+const productionService = require('../services/productionService');
+const notificationService = require('../services/notificationService');
+
+const MIDTRANS_API_BASE = 'https://api.midtrans.com';
+const MIDTRANS_SANDBOX_API_BASE = 'https://api.sandbox.midtrans.com';
+const DEFAULT_FRONTEND_URL = 'https://ukmkemasan-erp-frontend.vercel.app';
+const ORDER_STATUS_FLOW = ['Quotation', 'Payment', 'Production', 'Quality Control', 'Shipping', 'Completed'];
+
+const getMidtransConfig = () => {
+  const serverKey = process.env.MIDTRANS_SERVER_KEY;
+  const clientKey = process.env.MIDTRANS_CLIENT_KEY;
+  const isProduction = String(process.env.MIDTRANS_IS_PRODUCTION || '').toLowerCase() === 'true';
+  const frontendUrl = process.env.FRONTEND_URL || DEFAULT_FRONTEND_URL;
+
+  return {
+    serverKey,
+    clientKey,
+    isProduction,
+    apiBaseUrl: isProduction ? MIDTRANS_API_BASE : MIDTRANS_SANDBOX_API_BASE,
+    frontendUrl,
+  };
+};
+
+const buildMidtransAuthHeader = (serverKey) => (
+  `Basic ${Buffer.from(`${serverKey}:`).toString('base64')}`
+);
+
+const resolveInvoiceStatus = (invoice) => {
+  const totalAmount = Number(invoice?.totalAmount) || 0;
+  const paidAmount = Number(invoice?.paidAmount) || 0;
+
+  if (totalAmount > 0 && paidAmount >= totalAmount) {
+    return 'Paid';
+  }
+
+  if (paidAmount > 0) {
+    return 'Partially Paid';
+  }
+
+  const dueDate = invoice?.dueDate ? new Date(invoice.dueDate) : null;
+  if (dueDate && dueDate.getTime() < Date.now()) {
+    return 'Overdue';
+  }
+
+  return invoice?.status === 'Draft' ? 'Draft' : 'Issued';
+};
+
+const generateDocumentNumber = async (Model, prefix) => {
+  const timestamp = Date.now();
+  const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
+  return `${prefix}-${new Date().getFullYear()}-${timestamp}-${randomSuffix}`;
+};
+
+const isDuplicateKeyError = (error) => error?.code === 11000;
+
+const parseInvoiceIdFromMidtransOrderId = (orderId) => {
+  const match = String(orderId || '').match(/^INV-([a-f0-9]{24})-\d+$/i);
+  return match ? match[1] : null;
+};
+
+const mapMidtransMethod = (paymentType) => {
+  const normalized = String(paymentType || '').toLowerCase();
+
+  if (normalized === 'bank_transfer' || normalized === 'echannel') {
+    return 'Bank Transfer';
+  }
+
+  if (normalized === 'qris') {
+    return 'QRIS';
+  }
+
+  return 'Other';
+};
+
+const ensureCustomerOrderAccess = async (orderId, user) => {
+  const order = await Order.findById(orderId)
+    .populate('customer', 'name email phone')
+    .populate('product', 'name sku category')
+    .populate('items.product', 'name sku category');
+
+  if (!order) {
+    return { error: { status: 404, message: 'Order tidak ditemukan' } };
+  }
+
+  const isOwner = String(order.customer?._id || order.customer) === String(user?._id);
+  const isAdmin = user?.role === 'admin';
+
+  if (!isOwner && !isAdmin) {
+    return { error: { status: 403, message: 'Akses ditolak untuk pembayaran order ini' } };
+  }
+
+  return { order };
+};
+
+const buildInvoiceItemsFromOrder = (order) => {
+  if (order.items && order.items.length > 0) {
+    return order.items.map((item) => ({
+      product: item.product?._id || item.product,
+      name: item.product?.name || item.sku || '',
+      sku: item.sku || '',
+      size: item.size || '',
+      color: item.color || '',
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      subtotal: item.subtotal || (item.quantity * item.unitPrice)
+    }));
+  }
+  return [];
+};
+
+const ensureInvoiceForOrder = async (order, userId) => {
+  let invoice = await Invoice.findOne({ order: order._id });
+
+  if (invoice) {
+    return invoice;
+  }
+
+  const invoiceItems = buildInvoiceItemsFromOrder(order);
+  const hasItems = invoiceItems.length > 0;
+  const totalAmount = Number(order?.totalPrice || 0);
+
+  let quantity;
+  let unitPrice;
+
+  if (hasItems) {
+    quantity = invoiceItems.reduce((sum, i) => sum + i.quantity, 0);
+    unitPrice = quantity > 0 ? (totalAmount / quantity) : 0;
+  } else {
+    quantity = Number(order?.details?.quantity) || 0;
+    unitPrice = Number(order?.details?.unitPrice) || (
+      quantity ? totalAmount / quantity : 0
+    );
+  }
+
+  if (!quantity || !Number.isFinite(unitPrice) || !Number.isFinite(totalAmount) || totalAmount <= 0) {
+    throw new Error('Order belum siap untuk dibuatkan invoice pembayaran');
+  }
+
+  const issuedDate = new Date();
+  const dueDate = new Date(issuedDate);
+  dueDate.setDate(dueDate.getDate() + 14);
+
+  const invoiceData = {
+    invoiceNumber: await generateDocumentNumber(Invoice, 'INV'),
+    order: order._id,
+    customer: order.customer?._id || order.customer,
+    issuedDate,
+    dueDate,
+    quantity,
+    unitPrice,
+    subtotal: totalAmount,
+    totalAmount,
+    status: 'Issued',
+    notes: 'Auto-generated for Midtrans checkout',
+    createdBy: userId,
+  };
+
+  if (hasItems) {
+    invoiceData.items = invoiceItems;
+    invoiceData.product = null;
+  } else {
+    invoiceData.product = order.product?._id || order.product;
+  }
+
+  invoice = await Invoice.create(invoiceData);
+
+  if (order.status === 'Quotation') {
+    order.status = 'Payment';
+    await order.save();
+  }
+
+  return invoice;
+};
+
+const buildPaymentSummary = async (order, invoice) => {
+  const payments = await PaymentReceived.find({ invoice: invoice._id })
+    .sort({ paymentDate: -1, createdAt: -1 })
+    .select('paymentNumber amount paymentDate method referenceNo notes createdAt');
+
+  const paidAmount = Number(invoice?.paidAmount || 0);
+  const totalAmount = Number(invoice?.totalAmount || 0);
+
+  return {
+    order,
+    invoice,
+    payments,
+    paymentSummary: {
+      totalAmount,
+      paidAmount,
+      outstandingAmount: Math.max(totalAmount - paidAmount, 0),
+      isPaid: totalAmount > 0 && paidAmount >= totalAmount,
+    },
+  };
+};
+
+const syncOrderPaymentState = async (orderId, invoice) => {
+  const order = await Order.findById(orderId)
+    .populate('customer', 'name email phone')
+    .populate('product', 'name category material')
+    .populate('items.product', 'name category material');
+  if (!order) {
+    return null;
+  }
+
+  const totalAmount = Number(invoice?.totalAmount || 0);
+  const paidAmount = Number(invoice?.paidAmount || 0);
+  const currentStatusRank = ORDER_STATUS_FLOW.indexOf(order.status);
+  const productionStatusRank = ORDER_STATUS_FLOW.indexOf('Production');
+
+  order.isPaid = totalAmount > 0 && paidAmount >= totalAmount;
+
+  // Only advance forward; never downgrade an order that is already beyond production.
+  if (order.isPaid && currentStatusRank >= 0 && currentStatusRank < productionStatusRank) {
+    order.status = 'Production';
+
+    try {
+      const task = await productionService.autoCreateProductionTask(order);
+      await notificationService.sendTelegramAlert(task, order);
+    } catch (err) {
+      console.error('Auto production task creation failed:', err.message);
+    }
+  } else if (order.status === 'Quotation') {
+    order.status = 'Payment';
+  }
+
+  await order.save();
+  return order;
+};
+
+const requestMidtransSnapToken = async (payload) => {
+  const { serverKey, apiBaseUrl } = getMidtransConfig();
+
+  if (!serverKey) {
+    const error = new Error('MIDTRANS_SERVER_KEY belum dikonfigurasi');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const response = await fetch(`${apiBaseUrl}/snap/v1/transactions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      Authorization: buildMidtransAuthHeader(serverKey),
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const error = new Error(data.error_messages?.[0] || data.status_message || 'Gagal membuat Midtrans transaction');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return data;
+};
+
+const fetchMidtransTransactionStatus = async (midtransOrderId) => {
+  const { serverKey, apiBaseUrl } = getMidtransConfig();
+  if (!serverKey) return null;
+
+  // Midtrans Status API is on the base API URL, not Snap URL
+  // apiBaseUrl is already base (https://api.sandbox.midtrans.com)
+  try {
+    const response = await fetch(`${apiBaseUrl}/v2/${midtransOrderId}/status`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: buildMidtransAuthHeader(serverKey),
+      },
+    });
+
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (error) {
+    console.error('[Midtrans] Error fetching status:', error.message);
+    return null;
+  }
+};
+
+const processSettledTransaction = async (invoice, midtransData) => {
+  const {
+    transaction_status: transactionStatus,
+    fraud_status: fraudStatus,
+    transaction_id: transactionId,
+    payment_type: paymentType,
+    gross_amount: grossAmount,
+    settlement_time: settlementTime,
+    order_id: midtransOrderId,
+  } = midtransData;
+
+  const isSettled = transactionStatus === 'settlement'
+    || (transactionStatus === 'capture' && fraudStatus === 'accept');
+
+  if (!isSettled) return false;
+
+  const paymentReference = transactionId || midtransOrderId;
+  const existingPayment = await PaymentReceived.findOne({ referenceNo: paymentReference });
+  
+  if (!existingPayment) {
+    const paymentAmount = Number(grossAmount) || 0;
+    const outstandingAmount = Math.max(
+      (Number(invoice.totalAmount) || 0) - (Number(invoice.paidAmount) || 0),
+      0
+    );
+    const appliedAmount = Math.min(paymentAmount, outstandingAmount);
+
+    if (appliedAmount > 0) {
+      try {
+        await PaymentReceived.create({
+          paymentNumber: await generateDocumentNumber(PaymentReceived, 'PAY'),
+          invoice: invoice._id,
+          order: invoice.order,
+          customer: invoice.customer,
+          amount: appliedAmount,
+          paymentDate: settlementTime ? new Date(settlementTime) : new Date(),
+          method: mapMidtransMethod(paymentType),
+          referenceNo: paymentReference,
+          notes: `Midtrans Sync ${transactionStatus} (${paymentType || 'unknown'})`,
+        });
+
+        invoice.paidAmount = (Number(invoice.paidAmount) || 0) + appliedAmount;
+        invoice.status = resolveInvoiceStatus(invoice);
+        await invoice.save();
+        await syncOrderPaymentState(invoice.order, invoice);
+        return true;
+      } catch (error) {
+        if (!isDuplicateKeyError(error)) throw error;
+      }
+    }
+  }
+  return false;
+};
+
+exports.getOrderPaymentSummary = async (req, res) => {
+  try {
+    const { order, error } = await ensureCustomerOrderAccess(req.params.orderId, req.user);
+    if (error) {
+      return res.status(error.status).json({ message: error.message });
+    }
+
+    const invoice = await ensureInvoiceForOrder(order, req.user?._id);
+
+    // Sync with Midtrans if we have a transaction ID
+    if (invoice.lastMidtransOrderId && invoice.status !== 'Paid') {
+      const midtransStatus = await fetchMidtransTransactionStatus(invoice.lastMidtransOrderId);
+      if (midtransStatus) {
+        await processSettledTransaction(invoice, midtransStatus);
+      }
+    }
+
+    invoice.status = resolveInvoiceStatus(invoice);
+    await invoice.save();
+
+    const refreshedOrder = await Order.findById(order._id)
+      .populate('customer', 'name email phone')
+      .populate('product', 'name sku category')
+      .populate('items.product', 'name sku category');
+
+    const summary = await buildPaymentSummary(refreshedOrder || order, invoice);
+
+    res.json({
+      ...summary,
+      midtrans: {
+        clientKeyConfigured: Boolean(getMidtransConfig().clientKey),
+        clientKey: getMidtransConfig().clientKey || '',
+        isProduction: getMidtransConfig().isProduction,
+      },
+    });
+  } catch (error) {
+    res.status(error.statusCode || 400).json({ message: error.message });
+  }
+};
+
+exports.createMidtransSnapToken = async (req, res) => {
+  try {
+    const { order, error } = await ensureCustomerOrderAccess(req.params.orderId, req.user);
+    if (error) {
+      return res.status(error.status).json({ message: error.message });
+    }
+
+    const invoice = await ensureInvoiceForOrder(order, req.user?._id);
+    invoice.status = resolveInvoiceStatus(invoice);
+    await invoice.save();
+
+    const outstandingAmount = Math.max(
+      (Number(invoice.totalAmount) || 0) - (Number(invoice.paidAmount) || 0),
+      0
+    );
+
+    if (!outstandingAmount) {
+      return res.status(400).json({ message: 'Invoice ini sudah lunas' });
+    }
+
+    const transactionOrderId = `INV-${String(invoice._id)}-${Date.now()}`;
+    
+    // Save identifying transaction ID for later sync
+    invoice.lastMidtransOrderId = transactionOrderId;
+    await invoice.save();
+
+    const { frontendUrl } = getMidtransConfig();
+    const baseFrontendUrl = frontendUrl;
+    const paymentPageUrl = `${baseFrontendUrl}/portal/orders/${order._id}/payment`;
+
+    const buildItemDetails = () => {
+      let items = [];
+
+      if (order.items && order.items.length > 0) {
+        items = order.items.map((item, idx) => {
+          const prod = item.product?._id || item.product;
+          const itemName = item.product?.name || item.sku || `Item ${idx + 1}`;
+          return {
+            id: String(prod),
+            name: `${itemName}${item.size ? ` (${item.size}` : ''}${item.color ? `/${item.color}` : ''}${item.size || item.color ? ')' : ''}`,
+            price: item.unitPrice,
+            quantity: item.quantity,
+          };
+        });
+      } else {
+        items = [{
+          id: String(order.product?._id || order.product),
+          name: order.product?.name || `Order ${order.orderNumber}`,
+          price: outstandingAmount,
+          quantity: 1,
+        }];
+      }
+
+      const itemsTotal = items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+      const diff = outstandingAmount - itemsTotal;
+      if (Math.abs(diff) > 100) {
+        items.push({
+          id: 'SHIPPING',
+          name: 'Biaya Pengiriman',
+          price: diff,
+          quantity: 1,
+        });
+      }
+      return items;
+    };
+
+    const snapPayload = {
+      transaction_details: {
+        order_id: transactionOrderId,
+        gross_amount: outstandingAmount,
+      },
+      item_details: buildItemDetails(),
+      customer_details: {
+        first_name: order.customer?.name || 'Customer',
+        email: order.customer?.email || undefined,
+        phone: order.customer?.phone || undefined,
+      },
+      custom_field1: String(invoice._id),
+      custom_field2: String(order._id),
+      custom_field3: order.orderNumber,
+      callbacks: {
+        finish: process.env.MIDTRANS_FINISH_URL || paymentPageUrl,
+        pending: process.env.MIDTRANS_PENDING_URL || paymentPageUrl,
+        error: process.env.MIDTRANS_ERROR_URL || paymentPageUrl,
+      },
+    };
+
+    const snapResponse = await requestMidtransSnapToken(snapPayload);
+
+    res.status(201).json({
+      token: snapResponse.token,
+      redirectUrl: snapResponse.redirect_url,
+      invoiceId: invoice._id,
+      invoiceNumber: invoice.invoiceNumber,
+      outstandingAmount,
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+    });
+  } catch (error) {
+    res.status(error.statusCode || 400).json({ message: error.message });
+  }
+};
+
+exports.handleMidtransWebhook = async (req, res) => {
+  try {
+    const { serverKey } = getMidtransConfig();
+
+    if (!serverKey) {
+      return res.status(500).json({ message: 'MIDTRANS_SERVER_KEY belum dikonfigurasi' });
+    }
+
+    const {
+      order_id: midtransOrderId,
+      status_code: statusCode,
+      gross_amount: grossAmount,
+      signature_key: signatureKey,
+    } = req.body || {};
+
+    const expectedSignature = crypto
+      .createHash('sha512')
+      .update(`${midtransOrderId}${statusCode}${grossAmount}${serverKey}`)
+      .digest('hex');
+
+    if (!signatureKey || signatureKey !== expectedSignature) {
+      return res.status(401).json({ message: 'Signature Midtrans tidak valid' });
+    }
+
+    const invoiceId = parseInvoiceIdFromMidtransOrderId(midtransOrderId);
+    if (!invoiceId) {
+      return res.status(400).json({ message: 'order_id Midtrans tidak dikenali' });
+    }
+
+    const invoice = await Invoice.findById(invoiceId);
+    if (!invoice) {
+      return res.status(404).json({ message: 'Invoice tidak ditemukan untuk transaksi ini' });
+    }
+
+    // Use helper to process payment and update status
+    await processSettledTransaction(invoice, req.body);
+
+    res.json({
+      received: true,
+      invoiceId: invoice._id,
+      status: invoice.status,
+    });
+  } catch (error) {
+    console.error('[Midtrans Webhook Error]:', error.message);
+    res.status(500).json({ message: error.message });
+  }
+};

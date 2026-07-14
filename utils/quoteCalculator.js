@@ -1,0 +1,32 @@
+/**
+ * Menghitung harga UKM Kemasan (B2C < 1000pcs, B2B >= 1000pcs)
+ * @param {Object} product - Data produk dari DB
+ * @param {Number} quantity - Jumlah pesanan (kelipatan 100)
+ * @param {Boolean} useValve - Apakah pakai valve kopi
+ * @param {Object|null} selectedVariant - Varian produk yang dipilih
+ */
+const calculateQuote = (product, quantity, useValve, selectedVariant = null) => {
+  // 1. Tentukan Harga Dasar (Base Price)
+  // B2B jika >= 1000, selain itu B2C
+  const priceSource = selectedVariant || product;
+  let basePrice = quantity >= 1000 ? priceSource.priceB2B : priceSource.priceB2C;
+
+  // 2. Tambahan Biaya Valve (jika request)
+  // Usually valve is 600 per pcs as default
+  const valvePrice = product?.addons?.valvePrice ?? 600;
+  const valveExtra = useValve ? valvePrice : 0;
+
+  // 3. Kalkulasi Final
+  const unitPriceFinal = basePrice + valveExtra;
+  const totalAmount = unitPriceFinal * quantity;
+
+  return {
+    category: quantity >= 1000 ? 'B2B (Wholesale)' : 'B2C (Retail)',
+    basePrice: basePrice,
+    valveExtra: valveExtra,
+    unitPriceFinal: unitPriceFinal,
+    totalAmount: totalAmount
+  };
+};
+
+module.exports = calculateQuote;
