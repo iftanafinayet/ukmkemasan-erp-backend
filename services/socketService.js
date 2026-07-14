@@ -125,6 +125,13 @@ const setupSocket = (io) => {
         if (conversation) {
           const isAdmin = socket.user.role === 'admin';
 
+          const now = new Date().toISOString();
+          io.to(`conv:${conversationId}`).emit('read:updated', {
+            conversationId,
+            readBy: socket.user._id.toString(),
+            readAt: now,
+          });
+
           if (isAdmin) {
             const customerId = conversation.customer.toString();
             const unreadCount = await Message.countDocuments({

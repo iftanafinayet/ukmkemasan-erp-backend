@@ -165,6 +165,19 @@ const markRead = async (req, res) => {
       { readAt: new Date() }
     );
 
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`conv:${conversation._id}`).emit('read:updated', {
+          conversationId: conversation._id.toString(),
+          readBy: req.user._id.toString(),
+          readAt: new Date().toISOString(),
+        });
+      }
+    } catch (socketError) {
+      console.error('Socket emit gagal:', socketError.message);
+    }
+
     res.json({ message: 'Pesan telah dibaca' });
   } catch (error) {
     res.status(500).json({ message: error.message });
